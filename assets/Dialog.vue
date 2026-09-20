@@ -35,7 +35,8 @@ const emit = defineEmits(["update:modelValue"]);
 }
 
 .dialog-container {
-  background-color: white;
+  background-color: #111;
+  color: #fff;
   border-radius: 8px;
   overflow: hidden;
 }

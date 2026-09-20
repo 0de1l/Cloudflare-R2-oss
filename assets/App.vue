@@ -1,5 +1,15 @@
 <template>
   <div class="main" @dragenter.prevent @dragover.prevent @drop.prevent="onDrop">
+    <div v-if="!authenticated" class="login-panel">
+      <form @submit.prevent="login">
+        <h1>文件库登录</h1>
+        <input v-model="loginForm.username" autocomplete="username" placeholder="用户名" required />
+        <input v-model="loginForm.password" autocomplete="current-password" type="password" placeholder="密码" required />
+        <p v-if="loginError" class="login-error">用户名或密码错误</p>
+        <button type="submit">登录</button>
+      </form>
+    </div>
+    <template v-else>
     <progress
       v-if="uploadProgress !== null"
       :value="uploadProgress"
@@ -38,9 +48,9 @@
             />
           </svg>
         </button>
-        <Menu
+          <Menu
           v-model="showMenu"
-          :items="[{ text: '名称A-Z' }, { text: '大小↑' } ,{ text: '大小↓' }, { text: '粘贴' }]"
+          :items="[{ text: '名称A-Z' }, { text: '大小↑' } ,{ text: '大小↓' }, { text: '粘贴' }, { text: 'logout' }]"
           @click="onMenuClick"
         />
       </div>
@@ -200,6 +210,7 @@
         </li>
       </ul>
     </Dialog>
+    </template>
   </div>
 </template>
 
@@ -217,6 +228,9 @@ import UploadPopup from "./UploadPopup.vue";
 
 export default {
   data: () => ({
+    authenticated: false,
+    loginError: false,
+    loginForm: { username: "", password: "" },
     cwd: new URL(window.location).searchParams.get("p") || "",
     files: [],
     folders: [],
@@ -253,6 +267,16 @@ export default {
   },
 
   methods: {
+    async checkSession() {
+      const response = await fetch(`/api/children/${this.cwd}`);
+      this.authenticated = response.ok;
+      if (this.authenticated) {
+        const files = await response.json();
+        this.files = files.value;
+        this.folders = files.folders;
+        this.loading = false;
+      }
+    },
     copyLink(link) {
       const url = new URL(link, window.location.origin);
       navigator.clipboard.writeText(url.toString());
@@ -325,27 +349,47 @@ export default {
 
     onMenuClick(text) {
       switch (text) {
-        case "名称A-Z":
+        case "logout":
+          return this.logout();
+        case "鍚嶇ОA-Z":
           this.order = null;
           break;
-        case "大小↑":
-          this.order = "大小↑";
+        case "澶у皬鈫?":
+          this.order = "澶у皬鈫?";
           break;
-        case "大小↓":
-          this.order = "大小↓";
+        case "澶у皬鈫?":
+          this.order = "澶у皬鈫?";
           break;
-        case "粘贴":
+        case "绮樿创":
           return this.pasteFile();
       }
       this.files.sort((a, b) => {
-        if (this.order === "大小↑") {
-          return a.size - b.size;
-        } else if (this.order === "大小↓") {
-          return b.size - a.size;
-        } else {
-          return a.key.localeCompare(b.key);
-        }
+        if (this.order === "澶у皬鈫?") return a.size - b.size;
+        if (this.order === "澶у皬鈫?") return b.size - a.size;
+        return a.key.localeCompare(b.key);
       });
+    },
+    async login() {
+      this.loginError = false;
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(this.loginForm),
+      });
+      if (!response.ok) {
+        this.loginError = true;
+        return;
+      }
+      this.authenticated = true;
+      this.loginForm = { username: "", password: "" };
+      this.fetchFiles();
+    },
+
+    async logout() {
+      await fetch("/api/auth/logout", { method: "POST" });
+      this.authenticated = false;
+      this.files = [];
+      this.folders = [];
     },
 
     onUploadClicked(fileElement) {
@@ -623,6 +667,7 @@ export default {
   },
 
   created() {
+    this.checkSession();
     window.addEventListener("popstate", (ev) => {
       const searchParams = new URL(window.location).searchParams;
       if (searchParams.get("p") !== this.cwd)

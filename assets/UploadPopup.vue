@@ -97,7 +97,8 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
   width: 100%;
   z-index: 2;
   border-radius: 16px 16px 0 0;
-  background-color: white;
+  background-color: #111;
+  color: #fff;
 }
 
 .popup .button-grid {
