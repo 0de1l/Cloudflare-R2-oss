@@ -222,10 +222,10 @@ export default {
   data: () => ({
     authenticated: false,
     menuItems: [
-      { text: 'Name order', action: 'name' },
-      { text: 'Size ascending', action: 'size-asc' },
-      { text: 'Size descending', action: 'size-desc' },
-      { text: 'Paste', action: 'paste' },
+      { text: '\u540d\u79f0A-Z', action: 'name' },
+      { text: '\u5927\u5c0f\u2191', action: 'size-asc' },
+      { text: '\u5927\u5c0f\u2193', action: 'size-desc' },
+      { text: '\u7c98\u8d34', action: 'paste' },
       { text: '\u4e0a\u4f20\u6587\u4ef6', action: 'upload' },
       { text: '\u767b\u51fa', action: 'logout' },
     ],
