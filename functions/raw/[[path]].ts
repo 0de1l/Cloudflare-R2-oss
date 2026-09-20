@@ -4,7 +4,7 @@ import { notFound, parseBucketPath } from "@/utils/bucket";
 export async function onRequestGet(context) {
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
-  if (!get_auth_status(context, undefined, false)) return authFailure();
+  if (!(await get_auth_status(context, undefined, false))) return authFailure();
 
   const object = await bucket.get(path);
   if (!object) return notFound();

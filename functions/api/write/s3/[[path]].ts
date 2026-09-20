@@ -2,7 +2,7 @@ import { S3Client } from "@/utils/s3";
 import { authFailure, get_auth_status } from "@/utils/auth";
 
 export async function onRequest(context) {
-  if (!get_auth_status(context, "*", false)) return authFailure();
+  if (!(await get_auth_status(context, "*", false))) return authFailure();
   const { request, env } = context;
 
   const client = new S3Client(env.AWS_ACCESS_KEY_ID, env.AWS_SECRET_ACCESS_KEY);

@@ -44,7 +44,7 @@ export async function onRequestGet(context) {
   try {
     const { request, env } = context;
 
-    if (!get_auth_status(context, "*", false)) return authFailure();
+    if (!(await get_auth_status(context, "*", false))) return authFailure();
 
     const url = new URL(request.url);
     if (url.searchParams.has("current")) return await getCurrentBucket(context);

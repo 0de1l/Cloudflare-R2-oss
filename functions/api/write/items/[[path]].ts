@@ -2,7 +2,7 @@ import { authFailure, get_auth_status } from "@/utils/auth";
 import { notFound, parseBucketPath } from "@/utils/bucket";
 
 export async function onRequestPostCreateMultipart(context) {
-  if (!get_auth_status(context)) return authFailure();
+  if (!(await get_auth_status(context))) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
@@ -22,7 +22,7 @@ export async function onRequestPostCreateMultipart(context) {
 }
 
 export async function onRequestPostCompleteMultipart(context) {
-  if (!get_auth_status(context)) return authFailure();
+  if (!(await get_auth_status(context))) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
@@ -47,7 +47,7 @@ export async function onRequestPost(context) {
 }
 
 export async function onRequestPutMultipart(context) {
-  if (!get_auth_status(context)) return authFailure();
+  if (!(await get_auth_status(context))) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
@@ -64,7 +64,7 @@ export async function onRequestPutMultipart(context) {
 }
 
 export async function onRequestPut(context) {
-  if (!get_auth_status(context)) return authFailure();
+  if (!(await get_auth_status(context))) return authFailure();
   const url = new URL(context.request.url);
   if (url.searchParams.has("uploadId")) return onRequestPutMultipart(context);
 
@@ -77,7 +77,7 @@ export async function onRequestPut(context) {
 
   if (request.headers.has("x-amz-copy-source")) {
     const sourceName = decodeURIComponent(request.headers.get("x-amz-copy-source"));
-    if (!get_auth_status(context, sourceName)) return authFailure();
+    if (!(await get_auth_status(context, sourceName))) return authFailure();
     const source = await bucket.get(sourceName);
     if (!source) return notFound();
     content = source.body;
@@ -96,7 +96,7 @@ export async function onRequestPut(context) {
 }
 
 export async function onRequestDelete(context) {
-  if (!get_auth_status(context)) return authFailure();
+  if (!(await get_auth_status(context))) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
