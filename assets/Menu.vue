@@ -26,7 +26,7 @@ const emit = defineEmits(["update:modelValue", "click"]);
           :key="index"
           @click="
             emit('update:modelValue', false);
-            emit('click', item.text);
+            emit('click', item.action || item.text);
           "
         >
           <span v-text="item.text"></span>

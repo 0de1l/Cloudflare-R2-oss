@@ -20,16 +20,6 @@
       @upload="onUploadClicked"
       @createFolder="createFolder"
     ></UploadPopup>
-    <button class="upload-button circle" @click="showUploadPopup = true">
-      <img
-        class="toolbar-icon"
-        src="https://cdnjs.cloudflare.com/ajax/libs/material-design-icons/4.0.0/png/file/upload_file/materialicons/36dp/2x/baseline_upload_file_black_36dp.png"
-        alt="Upload"
-        width="36"
-        height="36"
-        @contextmenu.prevent
-      />
-    </button>
     <div class="app-bar">
       <input type="search" v-model="search" aria-label="Search" />
       <div class="menu-button">
@@ -49,10 +39,10 @@
           </svg>
         </button>
           <Menu
-          v-model="showMenu"
-          :items="[{ text: '名称A-Z' }, { text: '大小↑' } ,{ text: '大小↓' }, { text: '粘贴' }, { text: 'logout' }]"
-          @click="onMenuClick"
-        />
+            v-model="showMenu"
+            :items="menuItems"
+            @click="onMenuClick"
+          />
       </div>
     </div>
     <ul class="file-list">
@@ -231,6 +221,14 @@ import UploadPopup from "./UploadPopup.vue";
 export default {
   data: () => ({
     authenticated: false,
+    menuItems: [
+      { text: 'Name order', action: 'name' },
+      { text: 'Size ascending', action: 'size-asc' },
+      { text: 'Size descending', action: 'size-desc' },
+      { text: 'Paste', action: 'paste' },
+      { text: '\u4e0a\u4f20\u6587\u4ef6', action: 'upload' },
+      { text: '\u767b\u51fa', action: 'logout' },
+    ],
     loginError: false,
     loginForm: { username: "", password: "" },
     cwd: new URL(window.location).searchParams.get("p") || "",
@@ -349,25 +347,28 @@ export default {
       this.uploadFiles(files);
     },
 
-    onMenuClick(text) {
-      switch (text) {
+    onMenuClick(action) {
+      switch (action) {
         case "logout":
           return this.logout();
-        case "鍚嶇ОA-Z":
+        case "name":
           this.order = null;
           break;
-        case "澶у皬鈫?":
-          this.order = "澶у皬鈫?";
+        case "size-asc":
+          this.order = "size-asc";
           break;
-        case "澶у皬鈫?":
-          this.order = "澶у皬鈫?";
+        case "size-desc":
+          this.order = "size-desc";
           break;
-        case "绮樿创":
+        case "paste":
           return this.pasteFile();
+        case "upload":
+          this.showUploadPopup = true;
+          return;
       }
       this.files.sort((a, b) => {
-        if (this.order === "澶у皬鈫?") return a.size - b.size;
-        if (this.order === "澶у皬鈫?") return b.size - a.size;
+        if (this.order === "size-asc") return a.size - b.size;
+        if (this.order === "size-desc") return b.size - a.size;
         return a.key.localeCompare(b.key);
       });
     },
