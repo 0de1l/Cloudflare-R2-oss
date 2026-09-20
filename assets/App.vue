@@ -22,7 +22,7 @@
     ></UploadPopup>
     <button class="upload-button circle" @click="showUploadPopup = true">
       <img
-        style="filter: invert(100%)"
+        class="toolbar-icon"
         src="https://cdnjs.cloudflare.com/ajax/libs/material-design-icons/4.0.0/png/file/upload_file/materialicons/36dp/2x/baseline_upload_file_black_36dp.png"
         alt="Upload"
         width="36"
@@ -65,6 +65,7 @@
         >
           <div class="file-icon">
             <img
+              class="folder-icon"
               src="https://cdnjs.cloudflare.com/ajax/libs/material-design-icons/4.0.0/png/file/folder/materialicons/36dp/2x/baseline_folder_black_36dp.png"
               width="36"
               height="36"
@@ -86,6 +87,7 @@
         >
           <div class="file-icon">
             <img
+              class="folder-icon"
               src="https://cdnjs.cloudflare.com/ajax/libs/material-design-icons/4.0.0/png/file/folder/materialicons/36dp/2x/baseline_folder_black_36dp.png"
               width="36"
               height="36"
@@ -693,7 +695,7 @@ export default {
   position: sticky;
   top: 0;
   padding: 8px;
-  background-color: white;
+  background-color: #000;
   display: flex;
 }
 
@@ -708,7 +710,7 @@ export default {
 }
 
 .menu-button > button:hover {
-  background-color: whitesmoke;
+  background-color: #202020;
 }
 
 .menu {

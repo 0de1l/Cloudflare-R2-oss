@@ -49,7 +49,9 @@ const emit = defineEmits(["update:modelValue", "click"]);
 
 .menu-content {
   position: absolute;
-  background-color: white;
+  background-color: #111;
+  color: #fff;
+  border: 1px solid #444;
   z-index: 2;
   border-radius: 6px;
   right: -100%;
@@ -63,6 +65,6 @@ const emit = defineEmits(["update:modelValue", "click"]);
 }
 
 .menu-content li:hover {
-  background-color: rgba(0, 0, 0, 0.1);
+  background-color: #202020;
 }
 </style>

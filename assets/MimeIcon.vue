@@ -16,7 +16,7 @@ defineProps({
 </script>
 
 <template>
-  <div class="file-icon">
+  <div class="file-icon mime-icon">
     <img
       v-if="thumbnail"
       :src="thumbnail"
@@ -62,3 +62,8 @@ defineProps({
     </svg>
   </div>
 </template>
+
+<style scoped>
+.mime-icon svg { color: #fff; fill: currentColor; }
+.mime-icon img { filter: brightness(.8) contrast(1.2); }
+</style>
