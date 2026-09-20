@@ -1,26 +1,23 @@
+import { authFailure, get_auth_status } from "@/utils/auth";
 import { notFound, parseBucketPath } from "@/utils/bucket";
 
 export async function onRequestGet(context) {
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
-  const url = context.env["PUBURL"] + "/" + context.request.url.split("/raw/")[1]
+  if (!get_auth_status(context, undefined, false)) return authFailure();
 
-  var response =await fetch(new Request(url, {
-    body: context.request.body,
-    headers: context.request.headers,
-    method: context.request.method,
-    redirect: "follow",
-}))
+  const object = await bucket.get(path);
+  if (!object) return notFound();
 
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set(
+    "Cache-Control",
+    path.startsWith("_$flaredrive$/thumbnails/")
+      ? "private, max-age=31536000"
+      : "private, no-store"
+  );
 
-  const headers = new Headers(response.headers);
-  if (path.startsWith("_$flaredrive$/thumbnails/")){
-    headers.set("Cache-Control", "max-age=31536000");
-  }
-
-  return new Response(response.body, {
-    headers: headers,
-    status: response.status,
-    statusText: response.statusText
-});
+  return new Response(object.body, { headers });
 }

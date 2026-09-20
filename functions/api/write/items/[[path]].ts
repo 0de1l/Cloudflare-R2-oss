@@ -1,121 +1,85 @@
+import { authFailure, get_auth_status } from "@/utils/auth";
 import { notFound, parseBucketPath } from "@/utils/bucket";
-import {get_auth_status} from "@/utils/auth";
 
 export async function onRequestPostCreateMultipart(context) {
+  if (!get_auth_status(context)) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
   const request: Request = context.request;
-
   const customMetadata: Record<string, string> = {};
   if (request.headers.has("fd-thumbnail"))
     customMetadata.thumbnail = request.headers.get("fd-thumbnail");
 
   const multipartUpload = await bucket.createMultipartUpload(path, {
-    httpMetadata: {
-      contentType: request.headers.get("content-type"),
-    },
+    httpMetadata: { contentType: request.headers.get("content-type") },
     customMetadata,
   });
 
   return new Response(
-    JSON.stringify({
-      key: multipartUpload.key,
-      uploadId: multipartUpload.uploadId,
-    })
+    JSON.stringify({ key: multipartUpload.key, uploadId: multipartUpload.uploadId })
   );
 }
 
 export async function onRequestPostCompleteMultipart(context) {
+  if (!get_auth_status(context)) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
   const request: Request = context.request;
-  const url = new URL(request.url);
-  const uploadId = new URLSearchParams(url.search).get("uploadId");
+  const uploadId = new URL(request.url).searchParams.get("uploadId");
   const multipartUpload = await bucket.resumeMultipartUpload(path, uploadId);
 
-  const completeBody: { parts: Array<any> } = await request.json();
-
   try {
+    const completeBody: { parts: Array<any> } = await request.json();
     const object = await multipartUpload.complete(completeBody.parts);
-    return new Response(null, {
-      headers: { etag: object.httpEtag },
-    });
+    return new Response(null, { headers: { etag: object.httpEtag } });
   } catch (error: any) {
     return new Response(error.message, { status: 400 });
   }
 }
 
 export async function onRequestPost(context) {
-  const url = new URL(context.request.url);
-  const searchParams = new URLSearchParams(url.search);
-
-  if (searchParams.has("uploads")) {
-    return onRequestPostCreateMultipart(context);
-  }
-
-  if (searchParams.has("uploadId")) {
-    return onRequestPostCompleteMultipart(context);
-  }
-
+  const searchParams = new URL(context.request.url).searchParams;
+  if (searchParams.has("uploads")) return onRequestPostCreateMultipart(context);
+  if (searchParams.has("uploadId")) return onRequestPostCompleteMultipart(context);
   return new Response("Method not allowed", { status: 405 });
 }
 
 export async function onRequestPutMultipart(context) {
+  if (!get_auth_status(context)) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
   const request: Request = context.request;
   const url = new URL(request.url);
-
-  const uploadId = new URLSearchParams(url.search).get("uploadId");
+  const uploadId = url.searchParams.get("uploadId");
+  const partNumber = parseInt(url.searchParams.get("partNumber"));
   const multipartUpload = await bucket.resumeMultipartUpload(path, uploadId);
-
-  const partNumber = parseInt(
-    new URLSearchParams(url.search).get("partNumber")
-  );
-  const uploadedPart = await multipartUpload.uploadPart(
-    partNumber,
-    request.body
-  );
+  const uploadedPart = await multipartUpload.uploadPart(partNumber, request.body);
 
   return new Response(null, {
-    headers: {
-      "Content-Type": "application/json",
-      etag: uploadedPart.etag,
-    },
+    headers: { "Content-Type": "application/json", etag: uploadedPart.etag },
   });
 }
 
 export async function onRequestPut(context) {
-  if(!get_auth_status(context)){
-    var header = new Headers()
-    header.set("WWW-Authenticate",'Basic realm="需要登录"')
-    return new Response("没有操作权限", {
-        status: 401,
-        headers: header,
-    });
-   }
+  if (!get_auth_status(context)) return authFailure();
   const url = new URL(context.request.url);
-
-  if (new URLSearchParams(url.search).has("uploadId")) {
-    return onRequestPutMultipart(context);
-  }
+  if (url.searchParams.has("uploadId")) return onRequestPutMultipart(context);
 
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 
   const request: Request = context.request;
-
   let content = request.body;
   const customMetadata: Record<string, string> = {};
 
   if (request.headers.has("x-amz-copy-source")) {
-    const sourceName = decodeURIComponent(
-      request.headers.get("x-amz-copy-source")
-    );
+    const sourceName = decodeURIComponent(request.headers.get("x-amz-copy-source"));
+    if (!get_auth_status(context, sourceName)) return authFailure();
     const source = await bucket.get(sourceName);
+    if (!source) return notFound();
     content = source.body;
     if (source.customMetadata.thumbnail)
       customMetadata.thumbnail = source.customMetadata.thumbnail;
@@ -132,14 +96,7 @@ export async function onRequestPut(context) {
 }
 
 export async function onRequestDelete(context) {
-  if(!get_auth_status(context)){
-    var header = new Headers()
-    header.set("WWW-Authenticate",'Basic realm="需要登录"')
-    return new Response("没有操作权限", {
-        status: 401,
-        headers: header,
-    });
-   }
+  if (!get_auth_status(context)) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
 

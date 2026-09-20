@@ -1,31 +1,69 @@
-export function get_auth_status(context) {
-    var dopath = context.request.url.split("/api/write/items/")[1]
-    if(context.env["GUEST"]){
-        if(dopath.startsWith("_$flaredrive$/thumbnails/"))return true;
-        const allow_guest = context.env["GUEST"].split(",")
-        for (var aa of allow_guest){
-            if(aa == "*"){
-                return true
-            }else if(dopath.startsWith(aa)){
-                return true
-            }
-        }
+function requestPath(context, override?: string) {
+  if (override !== undefined) {
+    try {
+      const path = decodeURIComponent(override).replace(/^\/+/, "");
+      if (path.split("/").some((segment) => segment === "..")) return null;
+      return path;
+    } catch {
+      return null;
     }
-    var headers = new Headers(context.request.headers);
-    if(!headers.get('Authorization'))return false
-    const Authorization=headers.get('Authorization').split("Basic ")[1]
-    const account = atob(Authorization);
-    if(!account)return false
-    if(!context.env[account])return false
-    if(dopath.startsWith("_$flaredrive$/thumbnails/"))return true;
-    const allow = context.env[account].split(",")
-    for (var a of allow){
-        if(a == "*"){
-            return true
-        }else if(dopath.startsWith(a)){
-            return true
-        }
-    }
+  }
+
+  const rawPath = context.params?.path;
+  const joined = Array.isArray(rawPath) ? rawPath.join("/") : rawPath || "";
+
+  try {
+    const path = decodeURIComponent(joined).replace(/^\/+/, "");
+    if (path.split("/").some((segment) => segment === "..")) return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+function allowedPath(path: string, permissions: string) {
+  return permissions.split(",").some((allowed) => {
+    if (allowed === "*") return true;
+    return allowed !== "" && path.startsWith(allowed);
+  });
+}
+
+// Guests are only considered for write operations. Reads always require an account.
+export function get_auth_status(
+  context,
+  overridePath?: string,
+  allowGuest = true
+) {
+  const path = requestPath(context, overridePath);
+  if (path === null) return false;
+
+  if (
+    allowGuest &&
+    context.env["GUEST"] &&
+    allowedPath(path, context.env["GUEST"])
+  ) {
+    return true;
+  }
+
+  const authorization = context.request.headers.get("Authorization");
+  if (!authorization || !authorization.startsWith("Basic ")) return false;
+
+  let account: string;
+  try {
+    account = atob(authorization.slice("Basic ".length));
+  } catch {
     return false;
   }
-  
+
+  const permissions = context.env[account];
+  if (!permissions) return false;
+  if (path.startsWith("_$flaredrive$/thumbnails/")) return true;
+  return allowedPath(path, permissions);
+}
+
+export function authFailure() {
+  return new Response("Unauthorized", {
+    status: 401,
+    headers: { "WWW-Authenticate": 'Basic realm="需要登录"' },
+  });
+}
