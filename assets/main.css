@@ -128,8 +128,8 @@ button.circle {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #fff;
-  color: #000;
+  background-color: #242424;
+  color: #fff;
   cursor: pointer;
   box-shadow: 2px 4px 6px rgba(0, 0, 0, 0.3);
 }
@@ -166,10 +166,11 @@ button.circle {
 .folder-icon { filter: invert(1) brightness(1.15); }
 
 .file-icon svg,
-.file-icon img[src*="material-design-icons"],
-.upload-button img {
+.file-icon img[src*="material-design-icons"] {
   filter: invert(1) brightness(1.15);
 }
+
+.upload-button img { filter: none; }
 
 .file-icon svg path,
 .menu-content svg,

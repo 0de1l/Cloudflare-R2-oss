@@ -388,10 +388,14 @@ export default {
     },
 
     async logout() {
-      await fetch("/api/auth/logout", { method: "POST" });
+      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
       this.authenticated = false;
       this.files = [];
       this.folders = [];
+      this.showMenu = false;
+      this.showUploadPopup = false;
+      this.cwd = "";
+      window.history.replaceState(null, "", window.location.pathname);
     },
 
     onUploadClicked(fileElement) {
