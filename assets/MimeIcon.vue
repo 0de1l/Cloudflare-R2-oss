@@ -65,5 +65,5 @@ defineProps({
 
 <style scoped>
 .mime-icon svg { color: #fff; fill: currentColor; }
-.mime-icon img { filter: brightness(.8) contrast(1.2); }
+.mime-icon img { filter: none; }
 </style>

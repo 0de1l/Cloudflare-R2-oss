@@ -165,10 +165,9 @@ button.circle {
 .toolbar-icon,
 .folder-icon { filter: invert(1) brightness(1.15); }
 
-.file-icon svg,
-.file-icon img[src*="material-design-icons"] {
-  filter: invert(1) brightness(1.15);
-}
+.file-icon svg { filter: none; }
+.file-icon img[src*="material-design-icons"],
+.folder-icon { filter: invert(1) brightness(1.15); }
 
 .upload-button img { filter: none; }
 
