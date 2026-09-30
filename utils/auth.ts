@@ -23,6 +23,23 @@ function allowedPath(path: string, permissions: string) {
   );
 }
 
+function accountPermissions(context, account: string): string | null {
+  let accounts = context.env;
+  if (context.env.AUTH_USERS !== undefined) {
+    try {
+      accounts = JSON.parse(context.env.AUTH_USERS);
+    } catch {
+      return null;
+    }
+  }
+
+  // When AUTH_USERS is configured, it replaces legacy account bindings.
+  if (!accounts || typeof accounts !== "object" || Array.isArray(accounts)
+    || !Object.prototype.hasOwnProperty.call(accounts, account)) return null;
+  const permissions = accounts[account];
+  return typeof permissions === "string" && permissions !== "" ? permissions : null;
+}
+
 function toBase64Url(value: string | ArrayBuffer) {
   const bytes = typeof value === "string"
     ? new TextEncoder().encode(value)
@@ -84,14 +101,17 @@ export async function get_auth_status(context, overridePath?: string, allowGuest
   if (allowGuest && context.env.GUEST && allowedPath(path, context.env.GUEST)) return true;
 
   const account = await sessionAccount(context);
-  if (!account || !context.env[account]) return false;
+  if (!account) return false;
+  const permissions = accountPermissions(context, account);
+  if (!permissions) return false;
   if (path.startsWith("_$flaredrive$/thumbnails/")) return true;
-  return allowedPath(path, context.env[account]);
+  return allowedPath(path, permissions);
 }
 
 export async function authenticate(context, username: string, password: string) {
+  if (typeof username !== "string" || typeof password !== "string" || !username || !password) return null;
   const account = `${username}:${password}`;
-  if (!username || !password || !context.env[account] || !context.env.SESSION_SECRET) return null;
+  if (!accountPermissions(context, account) || !context.env.SESSION_SECRET) return null;
   return createSessionCookie(account, context.env.SESSION_SECRET);
 }
 
