@@ -36,12 +36,24 @@
           type="button"
           :aria-current="inPublicDirectory ? 'location' : null"
           @click="switchDirectory(publicRoot)"
-        >公共区</button>
+        >
+          <svg class="directory-switch-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+          </svg>
+          <span>公共区</span>
+        </button>
         <button
           type="button"
           :aria-current="!inPublicDirectory ? 'location' : null"
           @click="switchDirectory(home)"
-        >我的目录</button>
+        >
+          <svg class="directory-switch-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H10l2 2h7.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" />
+            <path d="M3.5 10h17" />
+          </svg>
+          <span>我的目录</span>
+        </button>
       </nav>
       <input type="search" v-model="search" aria-label="Search" />
       <button v-if="!authenticated" class="account-action" @click="showLogin = true">用户登录</button>
