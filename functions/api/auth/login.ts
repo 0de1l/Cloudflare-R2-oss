@@ -4,11 +4,17 @@ export async function onRequestPost(context) {
   try {
     const { username, password } = await context.request.json();
     const cookie = await authenticate(context, username, password);
-    if (!cookie) return new Response("Invalid credentials", { status: 401 });
+    if (!cookie) return new Response("Invalid credentials", {
+      status: 401,
+      headers: { "Cache-Control": "no-store" },
+    });
     return new Response(JSON.stringify({ ok: true }), {
-      headers: { "Content-Type": "application/json", "Set-Cookie": cookie },
+      headers: { "Content-Type": "application/json", "Set-Cookie": cookie, "Cache-Control": "no-store" },
     });
   } catch {
-    return new Response("Invalid request", { status: 400 });
+    return new Response("Invalid request", {
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
+    });
   }
 }

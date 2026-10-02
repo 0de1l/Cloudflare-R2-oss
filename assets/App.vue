@@ -1,15 +1,17 @@
 <template>
   <div class="main" @dragenter.prevent @dragover.prevent @drop.prevent="onDrop">
-    <div v-if="!authenticated" class="login-panel">
+    <div v-if="!initialized" class="state-panel">加载中...</div>
+    <div v-else-if="showLogin" class="login-panel">
       <form @submit.prevent="login">
-        <h1>文件库登录</h1>
+        <h1>用户登录</h1>
         <input v-model="loginForm.username" autocomplete="username" placeholder="用户名" required />
         <input v-model="loginForm.password" autocomplete="current-password" type="password" placeholder="密码" required />
-        <p v-if="loginError" class="login-error">用户名或密码错误</p>
+        <p v-if="loginError" class="login-error">登录失败，请检查账号、密码或网络后重试</p>
         <button type="submit">登录</button>
+        <button type="button" class="secondary-button" @click="showLogin = false">返回公共区</button>
       </form>
     </div>
-    <template v-else>
+    <template v-else-if="initialized">
     <progress
       v-if="uploadProgress !== null"
       :value="uploadProgress"
@@ -21,8 +23,13 @@
       @createFolder="createFolder"
     ></UploadPopup>
     <div class="app-bar">
+      <div class="location-label">
+        <strong>{{ authenticated ? "文件库" : "公共区" }}</strong>
+        <span>{{ cwd || "全部文件" }}</span>
+      </div>
       <input type="search" v-model="search" aria-label="Search" />
-      <div class="menu-button">
+      <button v-if="!authenticated" class="account-action" @click="showLogin = true">用户登录</button>
+      <div v-if="authenticated" class="menu-button">
         <button class="circle" @click="showMenu = true">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -45,8 +52,14 @@
           />
       </div>
     </div>
+    <div v-if="!authenticated" class="public-notice">
+      <span class="public-mark" aria-hidden="true"></span>
+      <span>公开浏览与下载</span>
+      <span class="notice-divider" aria-hidden="true">/</span>
+      <span>文件管理仅限管理员</span>
+    </div>
     <ul class="file-list">
-      <li v-if="cwd !== ''">
+      <li v-if="cwd !== '' && (authenticated || cwd !== publicRoot)">
         <div
           tabindex="0"
           class="file-item"
@@ -70,10 +83,7 @@
           tabindex="0"
           class="file-item"
           @click="cwd = folder"
-          @contextmenu.prevent="
-            showContextMenu = true;
-            focusedItem = folder;
-          "
+          @contextmenu.prevent="openContextMenu(folder)"
         >
           <div class="file-icon">
             <img
@@ -88,7 +98,7 @@
             class="file-name"
             v-text="folder.match(/.*?([^/]*)\/?$/)[1]"
           ></span>
-          <div style="margin-right: 10px;margin-left: auto;"
+          <div v-if="authenticated" style="margin-right: 10px;margin-left: auto;"
             @click.stop="
               showContextMenu = true;
               focusedItem = folder;
@@ -100,18 +110,15 @@
       </li>
       <li v-for="file in filteredFiles" :key="file.key">
         <div
-          @click="preview(`/raw/${file.key}`)"
-          @contextmenu.prevent="
-            showContextMenu = true;
-            focusedItem = file;
-          "
+          @click="preview(rawUrl(file.key))"
+          @contextmenu.prevent="openContextMenu(file)"
         >
           <div class="file-item">
             <MimeIcon
               :content-type="file.httpMetadata.contentType"
               :thumbnail="
                 file.customMetadata.thumbnail
-                  ? `/raw/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png`
+                  ? authenticated ? `/raw/_$flaredrive$/thumbnails/${file.customMetadata.thumbnail}.png` : null
                   : null
               "
             />
@@ -122,13 +129,22 @@
                 <span v-text="formatSize(file.size)"></span>
               </div>
             </div>
-            <div style="margin-right: 10px;margin-left: auto;"
+            <div class="file-actions">
+            <a
+              v-if="!authenticated"
+              class="download-action"
+              :href="rawUrl(file.key)"
+              :download="file.key.split('/').pop()"
+              @click.stop
+            >下载</a>
+            <div v-else style="margin-right: 10px;margin-left: auto;"
             @click.stop="
               showContextMenu = true;
               focusedItem = file;
             "
             >
               <svg viewBox="0 0 24 24" style="height: 30px; width: 30px;"><path fill="currentColor" d="M10.5,12A1.5,1.5 0 0,1 12,10.5A1.5,1.5 0 0,1 13.5,12A1.5,1.5 0 0,1 12,13.5A1.5,1.5 0 0,1 10.5,12M10.5,16.5A1.5,1.5 0 0,1 12,15A1.5,1.5 0 0,1 13.5,16.5A1.5,1.5 0 0,1 12,18A1.5,1.5 0 0,1 10.5,16.5M10.5,7.5A1.5,1.5 0 0,1 12,6A1.5,1.5 0 0,1 13.5,7.5A1.5,1.5 0 0,1 12,9A1.5,1.5 0 0,1 10.5,7.5M12,2A10,10 0 0,1 22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 12,2M12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12A8,8 0 0,0 12,4Z"></path></svg>
+            </div>
             </div>
           </div>
         </div>
@@ -137,11 +153,16 @@
     <div v-if="loading" style="margin-top: 12px; text-align: center">
       <span>加载中...</span>
     </div>
+    <div v-else-if="loadError" class="state-panel">
+      <span>无法读取此目录</span>
+      <button class="secondary-button" @click="retryLoading">重试</button>
+    </div>
     <div
       v-else-if="!filteredFiles.length && !filteredFolders.length"
       style="margin-top: 12px; text-align: center"
     >
-      <span>没有文件</span>
+      <span>{{ !authenticated && cwd === publicRoot ? "公共区还没有文件" : "没有文件" }}</span>
+      <button v-if="!authenticated && cwd === publicRoot" class="empty-admin-link" @click="showLogin = true">用户登录后上传文件</button>
     </div>
     <Dialog v-model="showContextMenu">
       <div
@@ -149,7 +170,7 @@
         class="contextmenu-filename"
         @click.stop.prevent
       ></div>
-      <ul v-if="typeof focusedItem === 'string'" class="contextmenu-list">
+      <ul v-if="authenticated && typeof focusedItem === 'string'" class="contextmenu-list">
         <li>
           <button @click="copyLink(`/?p=${encodeURIComponent(focusedItem)}`)">
             <span>复制链接</span>
@@ -169,33 +190,33 @@
           </button>
         </li>
       </ul>
-      <ul v-else class="contextmenu-list">
-        <li>
+      <ul v-else-if="focusedItem && typeof focusedItem !== 'string'" class="contextmenu-list">
+        <li v-if="authenticated">
           <button @click="renameFile(focusedItem.key)">
             <span>重命名</span>
           </button>
         </li>
         <li>
-          <a :href="`/raw/${focusedItem.key}`" target="_blank" download>
+          <a :href="rawUrl(focusedItem.key)" target="_blank" download>
             <span>下载</span>
           </a>
         </li>
-        <li>
+        <li v-if="authenticated">
           <button @click="clipboard = focusedItem.key">
             <span>复制</span>
           </button>
         </li>
-        <li>
+        <li v-if="authenticated">
           <button @click="moveFile(focusedItem.key)">
             <span>移动</span>
           </button>
         </li>
         <li>
-          <button @click="copyLink(`/raw/${focusedItem.key}`)">
-            <span>复制链接</span>
+          <button @click="copyLink(rawUrl(focusedItem.key))">
+            <span>复制下载链接</span>
           </button>
         </li>
-        <li>
+        <li v-if="authenticated">
           <button style="color: red" @click="removeFile(focusedItem.key)">
             <span>删除</span>
           </button>
@@ -221,22 +242,23 @@ import UploadPopup from "./UploadPopup.vue";
 export default {
   data: () => ({
     authenticated: false,
-    menuItems: [
-      { text: '\u540d\u79f0A-Z', action: 'name' },
-      { text: '\u5927\u5c0f\u2191', action: 'size-asc' },
-      { text: '\u5927\u5c0f\u2193', action: 'size-desc' },
-      { text: '\u7c98\u8d34', action: 'paste' },
-      { text: '\u4e0a\u4f20\u6587\u4ef6', action: 'upload' },
-      { text: '\u767b\u51fa', action: 'logout' },
-    ],
+    initialized: false,
+    showLogin: false,
+    publicRoot: "public/",
+    home: "public/",
+    menuItems: [],
     loginError: false,
     loginForm: { username: "", password: "" },
     cwd: new URL(window.location).searchParams.get("p") || "",
     files: [],
     folders: [],
     clipboard: null,
-    focusedItem: null,
+    focusedItem: "",
     loading: false,
+    loadError: false,
+    sessionError: false,
+    lastFetchedPath: null,
+    listRequestId: 0,
     order: null,
     search: "",
     showContextMenu: false,
@@ -268,14 +290,65 @@ export default {
 
   methods: {
     async checkSession() {
-      const response = await fetch(`/api/children/${this.cwd}`);
-      this.authenticated = response.ok;
-      if (this.authenticated) {
-        const files = await response.json();
-        this.files = files.value;
-        this.folders = files.folders;
-        this.loading = false;
+      this.loadError = false;
+      try {
+        const response = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!response.ok) throw new Error("Session check failed");
+        const session = await response.json();
+        this.authenticated = session.authenticated;
+        this.publicRoot = session.publicRoot || "public/";
+        this.home = session.home ?? this.publicRoot;
+        const requestedPath = new URL(window.location).searchParams.get("p") || "";
+        this.cwd = this.directoryPath(requestedPath);
+        if (requestedPath !== this.cwd) this.updateLocation();
+        this.menuItems = this.authenticated ? this.adminMenuItems() : [];
+        this.initialized = true;
+        this.sessionError = false;
+        await this.fetchFiles();
+      } catch {
+        this.loadError = true;
+        this.sessionError = true;
+        this.initialized = true;
       }
+    },
+
+    directoryPath(path) {
+      const normalized = path ? `${path.replace(/\/+$/, "")}/` : "";
+      if (this.authenticated) return normalized || this.home;
+      return normalized.startsWith(this.publicRoot) && !normalized.split("/").includes("..")
+        ? normalized : this.publicRoot;
+    },
+
+    retryLoading() {
+      return this.sessionError ? this.checkSession() : this.fetchFiles();
+    },
+
+    adminMenuItems() {
+      return [
+        { text: '\u540d\u79f0A-Z', action: 'name' },
+        { text: '\u5927\u5c0f\u2191', action: 'size-asc' },
+        { text: '\u5927\u5c0f\u2193', action: 'size-desc' },
+        { text: '\u7c98\u8d34', action: 'paste' },
+        { text: '\u4e0a\u4f20\u6587\u4ef6', action: 'upload' },
+        { text: '\u767b\u51fa', action: 'logout' },
+      ];
+    },
+
+    updateLocation() {
+      const url = new URL(window.location);
+      this.cwd
+        ? url.searchParams.set("p", this.cwd)
+        : url.searchParams.delete("p");
+      window.history.replaceState(null, "", url.toString());
+    },
+
+    openContextMenu(item) {
+      if (!this.authenticated && typeof item === "string") return;
+      this.focusedItem = item;
+      this.showContextMenu = true;
+    },
+    rawUrl(key) {
+      return `/raw/${key.split("/").map(encodeURIComponent).join("/")}`;
     },
     copyLink(link) {
       const url = new URL(link, window.location.origin);
@@ -307,24 +380,34 @@ export default {
       }
     },
 
-    fetchFiles() {
+    async fetchFiles() {
+      const requestId = ++this.listRequestId;
       this.files = [];
       this.folders = [];
+      this.lastFetchedPath = this.cwd;
       this.loading = true;
-      fetch(`/api/children/${this.cwd}`)
-        .then((res) => res.json())
-        .then((files) => {
-          this.files = files.value;
-          if (this.order) {
-            this.files.sort((a, b) => {
-              if (this.order === "size") {
-                return b.size - a.size;
-              }
-            });
-          }
-          this.folders = files.folders;
-          this.loading = false;
+      this.loadError = false;
+      const path = this.cwd.split("/").map(encodeURIComponent).join("/");
+      try {
+        const response = await fetch(`/api/children/${path}`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Directory could not be loaded");
+        const files = await response.json();
+        // A directory change or logout can finish before an older read request.
+        if (requestId !== this.listRequestId) return;
+        this.files = files.value;
+        this.files.sort((a, b) => {
+          if (this.order === "size-asc") return a.size - b.size;
+          if (this.order === "size-desc") return b.size - a.size;
+          return a.key.localeCompare(b.key);
         });
+        this.folders = files.folders;
+      } catch {
+        if (requestId === this.listRequestId) this.loadError = true;
+      } finally {
+        if (requestId === this.listRequestId) {
+          this.loading = false;
+        }
+      }
     },
 
     formatSize(size) {
@@ -338,6 +421,7 @@ export default {
     },
 
     onDrop(ev) {
+      if (!this.authenticated) return;
       let files;
       if (ev.dataTransfer.items) {
         files = [...ev.dataTransfer.items]
@@ -351,6 +435,9 @@ export default {
       switch (action) {
         case "logout":
           return this.logout();
+        case "login":
+          this.showLogin = true;
+          return;
         case "name":
           this.order = null;
           break;
@@ -374,29 +461,56 @@ export default {
     },
     async login() {
       this.loginError = false;
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(this.loginForm),
-      });
-      if (!response.ok) {
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(this.loginForm),
+        });
+        if (!response.ok) throw new Error("Login failed");
+        const sessionResponse = await fetch("/api/auth/session", { cache: "no-store" });
+        if (!sessionResponse.ok) throw new Error("Session check failed");
+        const session = await sessionResponse.json();
+        if (!session.authenticated) throw new Error("Session was not established");
+        this.authenticated = true;
+        this.sessionError = false;
+        this.publicRoot = session.publicRoot || "public/";
+        this.home = session.home ?? "";
+        this.showLogin = false;
+        this.loginForm = { username: "", password: "" };
+        this.search = "";
+        this.cwd = this.directoryPath(this.home);
+        this.updateLocation();
+        this.menuItems = this.adminMenuItems();
+        await this.fetchFiles();
+      } catch {
         this.loginError = true;
-        return;
       }
-      this.authenticated = true;
-      this.loginForm = { username: "", password: "" };
-      this.fetchFiles();
     },
 
     async logout() {
-      await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+      try {
+        const response = await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+        if (!response.ok) throw new Error("Logout failed");
+      } catch {
+        window.alert("退出登录失败，请检查网络后重试");
+        return;
+      }
       this.authenticated = false;
       this.files = [];
       this.folders = [];
       this.showMenu = false;
       this.showUploadPopup = false;
-      this.cwd = "";
-      window.history.replaceState(null, "", window.location.pathname);
+      this.showContextMenu = false;
+      this.focusedItem = "";
+      this.clipboard = null;
+      this.search = "";
+      this.uploadQueue = [];
+      this.home = this.publicRoot;
+      this.cwd = this.publicRoot;
+      this.menuItems = [];
+      this.updateLocation();
+      await this.fetchFiles();
     },
 
     onUploadClicked(fileElement) {
@@ -643,6 +757,7 @@ export default {
     },
 
     uploadFiles(files) {
+      if (!this.authenticated) return;
       if (this.cwd && !this.cwd.endsWith("/")) this.cwd += "/";
 
       const uploadTasks = Array.from(files).map((file) => ({
@@ -657,6 +772,7 @@ export default {
   watch: {
     cwd: {
       handler() {
+        if (!this.initialized || this.cwd === this.lastFetchedPath) return;
         this.fetchFiles();
         const url = new URL(window.location);
         if ((url.searchParams.get("p") || "") !== this.cwd) {
@@ -669,7 +785,6 @@ export default {
           this.cwd.replace(/.*\/(?!$)|\//g, "") || "/"
         } - 文件库`;
       },
-      immediate: true,
     },
   },
 
@@ -677,8 +792,8 @@ export default {
     this.checkSession();
     window.addEventListener("popstate", (ev) => {
       const searchParams = new URL(window.location).searchParams;
-      if (searchParams.get("p") !== this.cwd)
-        this.cwd = searchParams.get("p") || "";
+      this.cwd = this.directoryPath(searchParams.get("p") || "");
+      if (searchParams.get("p") !== this.cwd) this.updateLocation();
     });
   },
 

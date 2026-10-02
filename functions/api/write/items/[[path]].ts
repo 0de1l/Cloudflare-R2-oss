@@ -77,7 +77,7 @@ export async function onRequestPut(context) {
 
   if (request.headers.has("x-amz-copy-source")) {
     const sourceName = decodeURIComponent(request.headers.get("x-amz-copy-source"));
-    if (!(await get_auth_status(context, sourceName))) return authFailure();
+    if (!(await get_auth_status(context, encodeURIComponent(sourceName)))) return authFailure();
     const source = await bucket.get(sourceName);
     if (!source) return notFound();
     content = source.body;

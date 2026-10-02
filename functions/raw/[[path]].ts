@@ -1,10 +1,10 @@
-import { authFailure, get_auth_status } from "@/utils/auth";
+import { authFailure, get_auth_status, is_public_file } from "@/utils/auth";
 import { notFound, parseBucketPath } from "@/utils/bucket";
 
 export async function onRequestGet(context) {
+  if (!is_public_file(context) && !(await get_auth_status(context, undefined, false))) return authFailure();
   const [bucket, path] = parseBucketPath(context);
   if (!bucket) return notFound();
-  if (!(await get_auth_status(context, undefined, false))) return authFailure();
 
   const object = await bucket.get(path);
   if (!object) return notFound();
@@ -12,12 +12,22 @@ export async function onRequestGet(context) {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
-  headers.set(
-    "Cache-Control",
-    path.startsWith("_$flaredrive$/thumbnails/")
-      ? "private, max-age=31536000"
-      : "private, no-store"
-  );
+  headers.set("Cache-Control", "no-store");
 
   return new Response(object.body, { headers });
+}
+
+export async function onRequestHead(context) {
+  if (!is_public_file(context) && !(await get_auth_status(context, undefined, false))) return authFailure();
+  const [bucket, path] = parseBucketPath(context);
+  if (!bucket) return notFound();
+
+  const object = await bucket.head(path);
+  if (!object) return notFound();
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("Cache-Control", "no-store");
+  return new Response(null, { headers });
 }

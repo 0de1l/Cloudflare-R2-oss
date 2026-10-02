@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authenticate, get_auth_status } from "../utils/auth.ts";
+import {
+  authenticate,
+  get_auth_status,
+  get_session_info,
+  is_public_directory,
+  is_public_file,
+} from "../utils/auth.ts";
 
 const secret = "test-only-session-secret";
 
@@ -35,11 +41,46 @@ test("sessions require the current signing secret", async () => {
   assert.equal(await authenticate(context({ ...env, SESSION_SECRET: "" }), "admin", "test-password"), null);
 });
 
-test("guest permissions remain limited to the configured path and enabled routes", async () => {
-  const env = { GUEST: "public/" };
-  assert.equal(await get_auth_status(context(env, "", "public/file.txt")), true);
+test("public guest access is read-path scoped and GUEST never grants writes", async () => {
+  const env = { GUEST: "*" };
+  assert.equal(is_public_directory(context(env, "", "public")), true);
+  assert.equal(is_public_directory(context(env, "", "public/nested")), true);
+  assert.equal(is_public_directory(context(env, "", "public-other/file")), false);
+  assert.equal(is_public_directory(context(env, "", "private/file")), false);
+  assert.equal(is_public_directory(context(env, "", "public/../private")), false);
+  assert.equal(is_public_directory(context(env, "", "%70ublic/file")), true);
+  assert.equal(is_public_file(context(env, "", "public/file.txt")), true);
+  assert.equal(is_public_file(context(env, "", "public")), false);
+  assert.equal(is_public_file(context(env, "", "publicity/file.txt")), false);
+  assert.equal(await get_auth_status(context(env, "", "public/file.txt")), false);
   assert.equal(await get_auth_status(context(env, "", "private/file.txt")), false);
-  assert.equal(await get_auth_status(context(env, "", "public/file.txt"), undefined, false), false);
+});
+
+test("session information selects a safe public or permission-based home", async () => {
+  assert.deepEqual(await get_session_info(context({})), {
+    authenticated: false,
+    home: "public/",
+    publicRoot: "public/",
+  });
+  const publicAdminEnv = { AUTH_USERS: '{"editor:test-password":"public/,docs/"}' };
+  const publicAdminCookie = await authenticate(context(publicAdminEnv), "editor", "test-password");
+  assert.deepEqual(await get_session_info(context(publicAdminEnv, publicAdminCookie)), {
+    authenticated: true,
+    home: "public/",
+    publicRoot: "public/",
+  });
+  const adminEnv = { AUTH_USERS: '{"admin:test-password":"*"}' };
+  const adminCookie = await authenticate(context(adminEnv), "admin", "test-password");
+  assert.deepEqual(await get_session_info(context(adminEnv, adminCookie)), {
+    authenticated: true,
+    home: "",
+    publicRoot: "public/",
+  });
+  assert.deepEqual(await get_session_info(context({} , publicAdminCookie)), {
+    authenticated: false,
+    home: "public/",
+    publicRoot: "public/",
+  });
 });
 
 test("AUTH_USERS supports admin and directory-limited accounts", async () => {
