@@ -19,14 +19,30 @@
     ></progress>
     <UploadPopup
       v-model="showUploadPopup"
+      :can-upload="canUpload"
+      :can-create-folder="canManageDirectory"
+      :public-upload="inPublicDirectory"
+      :max-bytes="maxPublicUploadBytes"
       @upload="onUploadClicked"
       @createFolder="createFolder"
     ></UploadPopup>
     <div class="app-bar">
       <div class="location-label">
-        <strong>{{ authenticated ? "文件库" : "公共区" }}</strong>
+        <strong>{{ !authenticated || inPublicDirectory ? "公共区" : "文件库" }}</strong>
         <span>{{ cwd || "全部文件" }}</span>
       </div>
+      <nav v-if="authenticated" class="directory-switch" aria-label="目录切换">
+        <button
+          type="button"
+          :aria-current="inPublicDirectory ? 'location' : null"
+          @click="switchDirectory(publicRoot)"
+        >公共区</button>
+        <button
+          type="button"
+          :aria-current="!inPublicDirectory ? 'location' : null"
+          @click="switchDirectory(home)"
+        >我的目录</button>
+      </nav>
       <input type="search" v-model="search" aria-label="Search" />
       <button v-if="!authenticated" class="account-action" @click="showLogin = true">用户登录</button>
       <div v-if="authenticated" class="menu-button">
@@ -47,17 +63,26 @@
         </button>
           <Menu
             v-model="showMenu"
-            :items="menuItems"
+            :items="visibleMenuItems"
             @click="onMenuClick"
           />
       </div>
     </div>
-    <div v-if="!authenticated" class="public-notice">
+    <div v-if="inPublicDirectory" class="public-notice">
       <span class="public-mark" aria-hidden="true"></span>
-      <span>公开浏览与下载</span>
-      <span class="notice-divider" aria-hidden="true">/</span>
-      <span>文件管理仅限管理员</span>
+      <div class="public-upload-copy">
+        <span>{{ publicUploadEnabled ? "所有人均可上传与下载" : "公开浏览与下载；上传暂未开放" }}</span>
+        <span v-if="publicUploadEnabled">上传至 public/ 根目录，单文件上限 {{ formatSize(maxPublicUploadBytes) }}，同名不覆盖。上传后立即公开，请勿上传私密文件。</span>
+        <span>删除、移动等管理操作仅限管理员</span>
+      </div>
+      <button v-if="publicUploadEnabled" class="public-upload-action" @click="showUploadPopup = true">上传文件</button>
     </div>
+    <ul v-if="uploadResults.length" class="upload-results" aria-live="polite" aria-label="上传结果">
+      <li v-for="(result, index) in uploadResults" :key="index" :class="`upload-result-${result.status}`">
+        <span class="upload-result-name">{{ result.name }}</span>
+        <span>{{ result.message }}</span>
+      </li>
+    </ul>
     <ul class="file-list">
       <li v-if="cwd !== '' && (authenticated || cwd !== publicRoot)">
         <div
@@ -98,7 +123,7 @@
             class="file-name"
             v-text="folder.match(/.*?([^/]*)\/?$/)[1]"
           ></span>
-          <div v-if="authenticated" style="margin-right: 10px;margin-left: auto;"
+          <div v-if="canManagePath(folder)" style="margin-right: 10px;margin-left: auto;"
             @click.stop="
               showContextMenu = true;
               focusedItem = folder;
@@ -131,7 +156,7 @@
             </div>
             <div class="file-actions">
             <a
-              v-if="!authenticated"
+              v-if="!canManagePath(file.key)"
               class="download-action"
               :href="rawUrl(file.key)"
               :download="file.key.split('/').pop()"
@@ -162,7 +187,7 @@
       style="margin-top: 12px; text-align: center"
     >
       <span>{{ !authenticated && cwd === publicRoot ? "公共区还没有文件" : "没有文件" }}</span>
-      <button v-if="!authenticated && cwd === publicRoot" class="empty-admin-link" @click="showLogin = true">用户登录后上传文件</button>
+      <button v-if="canUpload && inPublicDirectory" class="empty-admin-link" @click="showUploadPopup = true">上传第一个公共文件</button>
     </div>
     <Dialog v-model="showContextMenu">
       <div
@@ -170,7 +195,7 @@
         class="contextmenu-filename"
         @click.stop.prevent
       ></div>
-      <ul v-if="authenticated && typeof focusedItem === 'string'" class="contextmenu-list">
+      <ul v-if="typeof focusedItem === 'string' && canManagePath(focusedItem)" class="contextmenu-list">
         <li>
           <button @click="copyLink(`/?p=${encodeURIComponent(focusedItem)}`)">
             <span>复制链接</span>
@@ -191,7 +216,7 @@
         </li>
       </ul>
       <ul v-else-if="focusedItem && typeof focusedItem !== 'string'" class="contextmenu-list">
-        <li v-if="authenticated">
+        <li v-if="canManagePath(focusedItem.key)">
           <button @click="renameFile(focusedItem.key)">
             <span>重命名</span>
           </button>
@@ -201,12 +226,12 @@
             <span>下载</span>
           </a>
         </li>
-        <li v-if="authenticated">
+        <li v-if="canManagePath(focusedItem.key)">
           <button @click="clipboard = focusedItem.key">
             <span>复制</span>
           </button>
         </li>
-        <li v-if="authenticated">
+        <li v-if="canManagePath(focusedItem.key)">
           <button @click="moveFile(focusedItem.key)">
             <span>移动</span>
           </button>
@@ -216,7 +241,7 @@
             <span>复制下载链接</span>
           </button>
         </li>
-        <li v-if="authenticated">
+        <li v-if="canManagePath(focusedItem.key)">
           <button style="color: red" @click="removeFile(focusedItem.key)">
             <span>删除</span>
           </button>
@@ -246,6 +271,9 @@ export default {
     showLogin: false,
     publicRoot: "public/",
     home: "public/",
+    publicUploadEnabled: false,
+    maxPublicUploadBytes: 52428800,
+    canManagePublic: false,
     menuItems: [],
     loginError: false,
     loginForm: { username: "", password: "" },
@@ -266,9 +294,30 @@ export default {
     showUploadPopup: false,
     uploadProgress: null,
     uploadQueue: [],
+    uploadResults: [],
+    uploadProcessing: false,
+    uploadSessionId: 0,
   }),
 
   computed: {
+    inPublicDirectory() {
+      return this.cwd.startsWith(this.publicRoot);
+    },
+
+    canManageDirectory() {
+      return this.canManagePath(this.cwd);
+    },
+
+    canUpload() {
+      return this.inPublicDirectory ? this.publicUploadEnabled : this.authenticated;
+    },
+
+    visibleMenuItems() {
+      return this.menuItems.filter((item) =>
+        (item.action !== "paste" || this.canManageDirectory) &&
+        (item.action !== "upload" || this.canUpload || this.canManageDirectory));
+    },
+
     filteredFiles() {
       let files = this.files;
       if (this.search) {
@@ -296,6 +345,7 @@ export default {
         if (!response.ok) throw new Error("Session check failed");
         const session = await response.json();
         this.authenticated = session.authenticated;
+        this.applyPublicCapabilities(session);
         this.publicRoot = session.publicRoot || "public/";
         this.home = session.home ?? this.publicRoot;
         const requestedPath = new URL(window.location).searchParams.get("p") || "";
@@ -317,6 +367,33 @@ export default {
       if (this.authenticated) return normalized || this.home;
       return normalized.startsWith(this.publicRoot) && !normalized.split("/").includes("..")
         ? normalized : this.publicRoot;
+    },
+
+    applyPublicCapabilities(session) {
+      this.publicUploadEnabled = session.publicUploadEnabled === true;
+      this.maxPublicUploadBytes = Number.isSafeInteger(session.maxPublicUploadBytes) &&
+        session.maxPublicUploadBytes > 0 && session.maxPublicUploadBytes <= 52428800
+        ? session.maxPublicUploadBytes : 52428800;
+      this.canManagePublic = this.authenticated && session.canManagePublic === true;
+    },
+
+    canManagePath(path) {
+      return this.authenticated && (!(path === this.publicRoot.slice(0, -1) || path.startsWith(this.publicRoot)) || this.canManagePublic);
+    },
+
+    switchDirectory(path) {
+      if (!this.authenticated) return;
+      this.search = "";
+      this.showMenu = false;
+      this.showContextMenu = false;
+      this.showUploadPopup = false;
+      this.focusedItem = "";
+      const target = this.directoryPath(path);
+      if (this.cwd === target) {
+        if (this.loadError) return this.fetchFiles();
+        return;
+      }
+      this.cwd = target;
     },
 
     retryLoading() {
@@ -343,7 +420,7 @@ export default {
     },
 
     openContextMenu(item) {
-      if (!this.authenticated && typeof item === "string") return;
+      if (typeof item === "string" && !this.canManagePath(item)) return;
       this.focusedItem = item;
       this.showContextMenu = true;
     },
@@ -356,6 +433,9 @@ export default {
     },
 
     async copyPaste(source, target) {
+      if (!this.canManagePath(source) || !this.canManagePath(target)) {
+        throw new Error("没有复制源文件或写入目标目录的权限");
+      }
       const uploadUrl = `/api/write/items/${target}`;
       await axios.put(uploadUrl, "", {
         headers: { "x-amz-copy-source": encodeURIComponent(source) },
@@ -363,6 +443,7 @@ export default {
     },
 
     async createFolder() {
+      if (!this.canManageDirectory) return;
       try {
         const folderName = window.prompt("请输入文件夹名称");
         if (!folderName) return;
@@ -421,12 +502,12 @@ export default {
     },
 
     onDrop(ev) {
-      if (!this.authenticated) return;
+      if (!this.canUpload) return;
       let files;
       if (ev.dataTransfer.items) {
         files = [...ev.dataTransfer.items]
           .filter((item) => item.kind === "file")
-          .map((item) => item.getAsFile());
+          .map((item) => item.getAsFile()).filter(Boolean);
       } else files = ev.dataTransfer.files;
       this.uploadFiles(files);
     },
@@ -450,7 +531,7 @@ export default {
         case "paste":
           return this.pasteFile();
         case "upload":
-          this.showUploadPopup = true;
+          if (this.canUpload || this.canManageDirectory) this.showUploadPopup = true;
           return;
       }
       this.files.sort((a, b) => {
@@ -473,6 +554,8 @@ export default {
         const session = await sessionResponse.json();
         if (!session.authenticated) throw new Error("Session was not established");
         this.authenticated = true;
+        this.cancelQueuedUploads();
+        this.applyPublicCapabilities(session);
         this.sessionError = false;
         this.publicRoot = session.publicRoot || "public/";
         this.home = session.home ?? "";
@@ -497,6 +580,7 @@ export default {
         return;
       }
       this.authenticated = false;
+      this.canManagePublic = false;
       this.files = [];
       this.folders = [];
       this.showMenu = false;
@@ -505,7 +589,7 @@ export default {
       this.focusedItem = "";
       this.clipboard = null;
       this.search = "";
-      this.uploadQueue = [];
+      this.cancelQueuedUploads();
       this.home = this.publicRoot;
       this.cwd = this.publicRoot;
       this.menuItems = [];
@@ -525,7 +609,7 @@ export default {
     },
 
     async pasteFile() {
-      if (!this.clipboard) return;
+      if (!this.canManageDirectory || !this.clipboard || !this.canManagePath(this.clipboard)) return;
       let newName = window.prompt("Rename to:");
       if (newName === null) return;
       if (newName === "") newName = this.clipboard.split("/").pop();
@@ -534,73 +618,100 @@ export default {
     },
 
     async processUploadQueue() {
-      if (!this.uploadQueue.length) {
-        this.fetchFiles();
-        this.uploadProgress = null;
-        return;
-      }
-
-      /** @type File **/
-      const { basedir, file } = this.uploadQueue.pop(0);
-      let thumbnailDigest = null;
-
-      if (file.type.startsWith("image/") || file.type === "video/mp4") {
-        try {
-          const thumbnailBlob = await generateThumbnail(file);
-          const digestHex = await blobDigest(thumbnailBlob);
-
-          const thumbnailUploadUrl = `/api/write/items/_$flaredrive$/thumbnails/${digestHex}.png`;
-          try {
-            await axios.put(thumbnailUploadUrl, thumbnailBlob);
-            thumbnailDigest = digestHex;
-          } catch (error) {
-            fetch("/api/write/")
-              .then((value) => {
-                if (value.redirected) window.location.href = value.url;
-              })
-              .catch(() => {});
-            console.log(`Upload ${digestHex}.png failed`);
-          }
-        } catch (error) {
-          console.log(`Generate thumbnail failed`);
-        }
-      }
-
+      if (this.uploadProcessing) return;
+      this.uploadProcessing = true;
       try {
-        const uploadUrl = `/api/write/items/${basedir}${file.name}`;
-        const headers = {};
-        const onUploadProgress = (progressEvent) => {
-          var percentCompleted =
-            (progressEvent.loaded * 100) / progressEvent.total;
-          this.uploadProgress = percentCompleted;
-        };
-        if (thumbnailDigest) headers["fd-thumbnail"] = thumbnailDigest;
-        if (file.size >= SIZE_LIMIT) {
-          await multipartUpload(`${basedir}${file.name}`, file, {
-            headers,
-            onUploadProgress,
-          });
-        } else {
-          await axios.put(uploadUrl, file, { headers, onUploadProgress });
+        while (this.uploadQueue.length) {
+          const task = this.uploadQueue.shift();
+          const { basedir, file, publicAppend, result } = task;
+          try {
+            this.checkUploadTask(task);
+            result.status = "uploading";
+            result.message = "上传中...";
+            const onUploadProgress = ({ loaded, total }) => {
+              if (task.sessionId !== this.uploadSessionId) return;
+              if (total) this.uploadProgress = (loaded * 100) / total;
+            };
+            // Public append must never invoke thumbnail or multipart write routes.
+            if (publicAppend) {
+              await axios.put(`/api/upload/public/${encodeURIComponent(file.name)}`, file, { onUploadProgress });
+            } else {
+              let thumbnailDigest = null;
+              if (file.type.startsWith("image/") || file.type === "video/mp4") {
+                try {
+                  const thumbnailBlob = await generateThumbnail(file);
+                  const digestHex = await blobDigest(thumbnailBlob);
+                  this.checkUploadTask(task);
+                  await axios.put(`/api/write/items/_$flaredrive$/thumbnails/${digestHex}.png`, thumbnailBlob);
+                  thumbnailDigest = digestHex;
+                } catch {
+                  // A missing thumbnail should not prevent the original upload.
+                }
+              }
+              this.checkUploadTask(task);
+              const headers = {};
+              if (thumbnailDigest) headers["fd-thumbnail"] = thumbnailDigest;
+              if (file.size >= SIZE_LIMIT) {
+                await multipartUpload(`${basedir}${file.name}`, file, { headers, onUploadProgress });
+              } else {
+                await axios.put(`/api/write/items/${basedir}${file.name}`, file, { headers, onUploadProgress });
+              }
+            }
+            result.status = "success";
+            result.message = `已上传至 ${basedir || "/"}`;
+          } catch (error) {
+            result.status = "error";
+            result.message = this.uploadErrorMessage(error);
+          }
         }
-      } catch (error) {
-        fetch("/api/write/")
-          .then((value) => {
-            if (value.redirected) window.location.href = value.url;
-          })
-          .catch(() => {});
-        console.log(`Upload ${file.name} failed`, error);
+      } finally {
+        this.uploadProcessing = false;
+        this.uploadProgress = null;
+        await this.fetchFiles();
       }
-      setTimeout(this.processUploadQueue);
+    },
+
+    checkUploadTask(task) {
+      if (task.sessionId !== this.uploadSessionId || (!task.publicAppend && !this.authenticated)) {
+        throw new Error("登录状态已变化，上传已取消");
+      }
+      if (task.publicAppend && !this.publicUploadEnabled) throw new Error("公共上传暂未开放");
+      if (task.publicAppend && task.file.size > this.maxPublicUploadBytes) {
+        throw new Error(`文件超过上限 ${this.formatSize(this.maxPublicUploadBytes)}`);
+      }
+    },
+
+    uploadErrorMessage(error) {
+      switch (error.response?.status) {
+        case 409: return "已存在同名文件，请更改文件名后重新选择；原文件未被覆盖";
+        case 413: return `文件超过服务器大小上限（当前 ${this.formatSize(this.maxPublicUploadBytes)}）`;
+        case 411: return "无法确定文件大小，请重新选择文件上传";
+        case 400: return "文件名或上传内容无效，请检查后重新选择";
+        case 503: return "公共上传暂不可用，请稍后重试";
+        case 401:
+        case 403: return "无上传权限或登录已过期，请重新登录";
+        default:
+          if (error.response) return "服务器上传失败，请稍后重试";
+          return !error.isAxiosError && error.message || "上传失败，请检查网络；刷新列表确认文件是否已上传";
+      }
+    },
+
+    cancelQueuedUploads() {
+      this.uploadSessionId++;
+      this.uploadQueue = [];
+      this.uploadResults = [];
+      this.uploadProgress = null;
     },
 
     async removeFile(key) {
+      if (!this.canManagePath(key)) return;
       if (!window.confirm(`确定要删除 ${key} 吗？`)) return;
       await axios.delete(`/api/write/items/${key}`);
       this.fetchFiles();
     },
 
     async renameFile(key) {
+      if (!this.canManagePath(key)) return;
       const newName = window.prompt("重命名为:");
       if (!newName) return;
       await this.copyPaste(key, `${this.cwd}${newName}`);
@@ -609,6 +720,7 @@ export default {
     },
 
     async moveFile(key) {
+      if (!this.canManagePath(key)) return;
       // 获取当前的目录结构
       const currentPath = this.cwd; // 当前所在目录
       const allFolders = [...this.folders]; // 所有可用目录
@@ -757,14 +869,26 @@ export default {
     },
 
     uploadFiles(files) {
-      if (!this.authenticated) return;
+      if (!this.canUpload) return;
       if (this.cwd && !this.cwd.endsWith("/")) this.cwd += "/";
-
-      const uploadTasks = Array.from(files).map((file) => ({
-        basedir: this.cwd,
-        file,
-      }));
-      this.uploadQueue.push(...uploadTasks);
+      for (const file of Array.from(files)) {
+        const result = { name: file.name, status: "queued", message: "等待上传" };
+        this.uploadResults.push(result);
+        const task = {
+          basedir: this.inPublicDirectory ? this.publicRoot : this.cwd,
+          publicAppend: this.inPublicDirectory,
+          sessionId: this.uploadSessionId,
+          file,
+          result,
+        };
+        try {
+          this.checkUploadTask(task);
+          this.uploadQueue.push(task);
+        } catch (error) {
+          result.status = "error";
+          result.message = this.uploadErrorMessage(error);
+        }
+      }
       setTimeout(() => this.processUploadQueue());
     },
   },

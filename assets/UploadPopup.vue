@@ -1,6 +1,10 @@
 <script setup>
 defineProps({
   modelValue: Boolean,
+  canUpload: { type: Boolean, default: true },
+  canCreateFolder: { type: Boolean, default: true },
+  publicUpload: Boolean,
+  maxBytes: { type: Number, default: 52428800 },
 });
 
 const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
@@ -16,8 +20,9 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
     </Transition>
     <Transition name="slide-up">
       <div v-if="modelValue" class="popup-content">
+        <p v-if="publicUpload && canUpload" class="popup-upload-notice">上传至 public/ 根目录，最多 {{ (maxBytes / 1048576).toFixed(2) }} MiB；同名文件不会被覆盖。上传后所有人均可下载。</p>
         <div class="button-grid">
-          <button onclick="this.lastElementChild.click()">
+          <button v-if="canUpload" onclick="this.lastElementChild.click()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
               <!--! Font Awesome Pro 6.2.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. -->
               <path
@@ -33,7 +38,7 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
               @change="emit('upload', $event.target)"
             />
           </button>
-          <button onclick="this.lastElementChild.click()">
+          <button v-if="canUpload" onclick="this.lastElementChild.click()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512">
               <!--! Font Awesome Pro 6.2.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. -->
               <path
@@ -49,7 +54,7 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
               @change="emit('upload', $event.target)"
             />
           </button>
-          <button onclick="this.lastElementChild.click()">
+          <button v-if="canUpload" onclick="this.lastElementChild.click()">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512">
               <!--! Font Awesome Pro 6.2.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. -->
               <path
@@ -65,7 +70,7 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
               @change="emit('upload', $event.target)"
             />
           </button>
-          <button type="button" @click="emit('createFolder')">
+          <button v-if="canCreateFolder" type="button" @click="emit('createFolder')">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
               <!--! Font Awesome Pro 6.2.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license (Commercial License) Copyright 2022 Fonticons, Inc. -->
               <path
@@ -103,7 +108,7 @@ const emit = defineEmits(["update:modelValue", "upload", "createFolder"]);
 
 .popup .button-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
   grid-gap: 8px;
   padding: 8px;
 }

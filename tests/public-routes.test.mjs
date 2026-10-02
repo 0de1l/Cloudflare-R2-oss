@@ -119,7 +119,10 @@ test("login issues a non-cacheable v2 cookie and logout only clears the browser 
     assert.ok(cookie.split("; ").includes(attribute), attribute);
   }
   const authenticated = await session.onRequestGet(makeContext("api/auth/session", { env, cookie }));
-  assert.deepEqual(await authenticated.json(), { authenticated: true, home: "", publicRoot: "public/" });
+  assert.deepEqual(await authenticated.json(), {
+    authenticated: true, home: "", publicRoot: "public/",
+    publicUploadEnabled: false, maxPublicUploadBytes: 52428800, canManagePublic: true,
+  });
   assert.equal((await raw.onRequestGet(makeContext("raw/private/secret.txt", { env, cookie }))).status, 200);
 
   const loggedOut = await logout.onRequestPost(makeContext("api/auth/logout", { env, cookie, method: "POST" }));
@@ -130,7 +133,10 @@ test("login issues a non-cacheable v2 cookie and logout only clears the browser 
   const cleared = loggedOut.headers.get("set-cookie");
   assert.equal(cleared, "fd_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0");
   const anonymous = await session.onRequestGet(makeContext("api/auth/session", { env, cookie: cleared }));
-  assert.deepEqual(await anonymous.json(), { authenticated: false, home: "public/", publicRoot: "public/" });
+  assert.deepEqual(await anonymous.json(), {
+    authenticated: false, home: "public/", publicRoot: "public/",
+    publicUploadEnabled: false, maxPublicUploadBytes: 52428800, canManagePublic: false,
+  });
   assert.equal((await raw.onRequestGet(makeContext("raw/private/secret.txt", { env, cookie: cleared }))).status, 401);
   assert.equal((await raw.onRequestGet(makeContext("raw/public/readme.txt", { env, cookie: cleared }))).status, 200);
 
@@ -138,6 +144,38 @@ test("login issues a non-cacheable v2 cookie and logout only clears the browser 
   const copied = await session.onRequestGet(makeContext("api/auth/session", { env, cookie }));
   assert.equal((await copied.json()).authenticated, true);
   assert.equal((await raw.onRequestGet(makeContext("raw/private/secret.txt", { env, cookie }))).status, 200);
+});
+
+test("session capabilities expose public append separately from public management", async () => {
+  const env = {
+    AUTH_USERS: '{"admin:secret":"*","editor:secret":"public/,docs/"}',
+    PUBLIC_UPLOAD_ENABLED: "true",
+    PUBLIC_UPLOAD_MAX_BYTES: "100",
+  };
+  const guest = await session.onRequestGet(makeContext("api/auth/session", { env }));
+  assert.deepEqual(await guest.json(), {
+    authenticated: false, home: "public/", publicRoot: "public/",
+    publicUploadEnabled: true, maxPublicUploadBytes: 100, canManagePublic: false,
+  });
+
+  const editorLogin = await login.onRequestPost(makeContext("api/auth/login", {
+    env, method: "POST", body: JSON.stringify({ username: "editor", password: "secret" }),
+  }));
+  const editorCookie = editorLogin.headers.get("set-cookie");
+  assert.equal(editorLogin.status, 200);
+  const editor = await session.onRequestGet(makeContext("api/auth/session", { env, cookie: editorCookie }));
+  assert.deepEqual(await editor.json(), {
+    authenticated: true, home: "public/", publicRoot: "public/",
+    publicUploadEnabled: true, maxPublicUploadBytes: 100, canManagePublic: false,
+  });
+
+  const adminLogin = await login.onRequestPost(makeContext("api/auth/login", {
+    env, method: "POST", body: JSON.stringify({ username: "admin", password: "secret" }),
+  }));
+  const admin = await session.onRequestGet(makeContext("api/auth/session", {
+    env, cookie: adminLogin.headers.get("set-cookie"),
+  }));
+  assert.equal((await admin.json()).canManagePublic, true);
 });
 
 test("login errors are non-cacheable and never set a session cookie", async () => {
@@ -290,4 +328,170 @@ test("malformed and encoded traversal paths cannot reach R2 reads", async () => 
     assert.equal((await raw.onRequestGet(context)).status, 401);
     assert.equal((await raw.onRequestHead(context)).status, 401);
   }
+});
+
+test("public management rejects ordinary prefix grants across all legacy upload paths", async () => {
+  const { authenticate } = await import("../utils/auth.ts");
+  for (const permissions of ["docs/", "public/,docs/", "public,docs/", "public%2F,docs/"]) {
+    const env = { AUTH_USERS: JSON.stringify({ "editor:secret": permissions }) };
+    const cookie = await authenticate(makeContext("", { env }), "editor", "secret");
+    for (const key of ["public", "public/", "public/file.txt", "%70ublic/file.txt", "public%2Ffile.txt", "public/new/"]) {
+      for (const [method, handler, suffix] of [
+        ["PUT", writes.onRequestPut, ""],
+        ["DELETE", writes.onRequestDelete, ""],
+        ["POST", writes.onRequestPost, "?uploads"],
+        ["POST", writes.onRequestPost, "?uploadId=test"],
+        ["PUT", writes.onRequestPut, "?uploadId=test&partNumber=1"],
+        ["POST", writes.onRequestPostCreateMultipart, "?uploads"],
+        ["POST", writes.onRequestPostCompleteMultipart, "?uploadId=test"],
+        ["PUT", writes.onRequestPutMultipart, "?uploadId=test&partNumber=1"],
+        ["GET", writeTest.onRequest, ""],
+      ]) {
+        const context = makeContext(`api/write/items/${key}${suffix}`, { env, cookie, method });
+        context.env.BUCKET = new Proxy({}, { get() { throw new Error("Denied management reached R2"); } });
+        assert.equal((await handler(context)).status, 401, `${permissions}: ${handler.name} ${key}`);
+      }
+    }
+  }
+});
+
+test("write authorization validates encoded paths once and retains private and thumbnail rules", async () => {
+  const { authenticate, get_auth_status, get_write_auth_status } = await import("../utils/auth.ts");
+  const env = { AUTH_USERS: '{"editor:secret":"public/,docs/,public%2F/"}' };
+  const cookie = await authenticate(makeContext("", { env }), "editor", "secret");
+  const context = makeContext("api/write/items/docs/file.txt", { env, cookie });
+  assert.equal(await get_auth_status(context, "public/file.txt"), true);
+  for (const key of ["public", "public/", "%70ublic/file.txt", "public%2Ffile.txt", "public/%2e%2e/private", "public/%ZZ"]) {
+    assert.equal(await get_write_auth_status(context, key), false, key);
+  }
+  for (const key of ["docs/file.txt", "public%252F/file.txt", "_$flaredrive$/thumbnails/test.png"]) {
+    assert.equal(await get_write_auth_status(context, key), true, key);
+  }
+  assert.equal(await get_write_auth_status(context, "docs-other/file.txt"), false);
+  assert.equal(await get_write_auth_status(makeContext("api/write/items/_$flaredrive$/thumbnails/test.png")), false);
+});
+
+test("copying a public source requires admin even with an authorized private destination", async () => {
+  const { authenticate } = await import("../utils/auth.ts");
+  const env = { AUTH_USERS: '{"editor:secret":"public/,docs/"}' };
+  const cookie = await authenticate(makeContext("", { env }), "editor", "secret");
+  for (const source of ["public%2Freadme.txt", "%70ublic/readme.txt", "public/readme.txt"]) {
+    const context = makeContext("api/write/items/docs/copy.txt", {
+      env, cookie, method: "PUT", headers: { "x-amz-copy-source": source },
+    });
+    context.env.BUCKET.get = () => { throw new Error("Denied public copy source reached R2"); };
+    assert.equal((await writes.onRequestPut(context)).status, 401, source);
+  }
+});
+
+test("admin cleanup and private scoped multipart retain their existing behavior", async () => {
+  const { authenticate } = await import("../utils/auth.ts");
+  const adminEnv = { AUTH_USERS: '{"admin:secret":"docs/,*"}' };
+  const cookie = await authenticate(makeContext("", { env: adminEnv }), "admin", "secret");
+  const deletion = makeContext("api/write/items/public/readme.txt", { env: adminEnv, cookie, method: "DELETE" });
+  let deleted;
+  deletion.env.BUCKET.delete = async (key) => { deleted = key; };
+  assert.equal((await writes.onRequestDelete(deletion)).status, 204);
+  assert.equal(deleted, "public/readme.txt");
+  assert.equal((await writeTest.onRequest(makeContext("api/write/test/public/", { env: adminEnv, cookie }))).status, 200);
+
+  const env = { AUTH_USERS: '{"editor:secret":"docs/"}' };
+  const privateCookie = await authenticate(makeContext("", { env }), "editor", "secret");
+  const calls = [];
+  const bucket = {
+    createMultipartUpload: async (key) => { calls.push(["create", key]); return { key, uploadId: "test" }; },
+    resumeMultipartUpload: async (key, uploadId) => ({
+      uploadPart: async (partNumber) => { calls.push(["part", key, uploadId, partNumber]); return { etag: "part-etag" }; },
+      complete: async (parts) => { calls.push(["complete", key, uploadId, parts]); return { httpEtag: '"complete"' }; },
+    }),
+  };
+  for (const [method, handler, suffix, body] of [
+    ["POST", writes.onRequestPost, "?uploads"],
+    ["PUT", writes.onRequestPut, "?uploadId=test&partNumber=1", "part"],
+    ["POST", writes.onRequestPost, "?uploadId=test", JSON.stringify({ parts: [{ partNumber: 1, etag: "part-etag" }] })],
+  ]) {
+    const response = await handler(makeContext(`api/write/items/docs/large.bin${suffix}`, {
+      env: { ...env, BUCKET: bucket }, cookie: privateCookie, method, body,
+    }));
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(calls, [
+    ["create", "docs/large.bin"],
+    ["part", "docs/large.bin", "test", 1],
+    ["complete", "docs/large.bin", "test", [{ partNumber: 1, etag: "part-etag" }]],
+  ]);
+});
+
+test("public GET and HEAD replace unsafe legacy metadata using a strict extension policy", async () => {
+  for (const [filename, type, disposition] of [
+    ["photo.PNG", "image/png", "inline"],
+    ["sound.mp3", "audio/mpeg", "inline"],
+    ["video.mp4", "video/mp4", "inline"],
+    ["readme.txt", "text/plain; charset=utf-8", "inline"],
+    ["payload.html", "application/octet-stream", "attachment"],
+    ["payload.svg", "application/octet-stream", "attachment"],
+    ["payload.js", "application/octet-stream", "attachment"],
+    ["payload.pdf", "application/octet-stream", "attachment"],
+    ["unknown", "application/octet-stream", "attachment"],
+    ["image.png.html", "application/octet-stream", "attachment"],
+    ["constructor", "application/octet-stream", "attachment"],
+  ]) {
+    const responses = [];
+    for (const [method, handler] of [["GET", raw.onRequestGet], ["HEAD", raw.onRequestHead]]) {
+      const context = makeContext(`raw/public/${filename}`, { method });
+      const object = {
+        body: new Response("<script>fetch('/api/write/items/public/file', {method:'DELETE'})</script>").body,
+        httpEtag: '"public-test"',
+        writeHttpMetadata(headers) {
+          headers.set("content-type", "text/html");
+          headers.set("content-encoding", "gzip");
+          headers.set("content-disposition", "inline");
+          headers.set("cache-control", "public, max-age=3600");
+        },
+      };
+      context.env.BUCKET.get = async () => object;
+      context.env.BUCKET.head = async () => object;
+      const response = await handler(context);
+      assert.equal(response.status, 200, filename);
+      assert.equal(response.headers.get("content-type"), type, filename);
+      assert.match(response.headers.get("content-disposition"), new RegExp(`^${disposition};`));
+      assert.equal(response.headers.get("content-encoding"), null);
+      assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+      assert.match(response.headers.get("content-security-policy"), /(?:^|;)\s*sandbox(?:;|$)/);
+      assert.doesNotMatch(response.headers.get("content-security-policy"), /allow-scripts|allow-same-origin/);
+      assert.equal(response.headers.get("cache-control"), "no-store");
+      assert.equal(response.headers.get("etag"), '"public-test"');
+      if (method === "HEAD") assert.equal(await response.text(), "");
+      responses.push(Object.fromEntries(response.headers));
+    }
+    assert.deepEqual(responses[0], responses[1], filename);
+  }
+});
+
+test("public filename headers safely encode Unicode and control characters while private metadata is unchanged", async () => {
+  const filename = '\u4e2d\u6587";\r\nreport.html';
+  const context = makeContext(`raw/public/${encodeURIComponent(filename)}`);
+  context.env.BUCKET.get = async () => ({ body: "file", httpEtag: '"test"' });
+  const response = await raw.onRequestGet(context);
+  const disposition = response.headers.get("content-disposition");
+  assert.match(disposition, /^attachment; filename="[\x20-\x21\x23-\x5b\x5d-\x7e]*"; filename\*=UTF-8''/);
+  assert.ok(disposition.endsWith(encodeURIComponent(filename)), disposition);
+  assert.doesNotMatch(disposition, /[\r\n]/);
+
+  const cookie = await adminCookie();
+  const privateContext = makeContext("raw/private/secret.txt", { cookie, env: { AUTH_USERS: '{"admin:secret":"*"}' } });
+  privateContext.env.BUCKET.get = async () => ({
+    body: "private",
+    httpEtag: '"test"',
+    writeHttpMetadata(headers) {
+      headers.set("content-type", "application/pdf");
+      headers.set("content-disposition", "inline");
+      headers.set("content-encoding", "gzip");
+    },
+  });
+  const privateResponse = await raw.onRequestGet(privateContext);
+  assert.equal(privateResponse.headers.get("content-type"), "application/pdf");
+  assert.equal(privateResponse.headers.get("content-disposition"), "inline");
+  assert.equal(privateResponse.headers.get("content-encoding"), "gzip");
+  assert.equal(privateResponse.headers.get("content-security-policy"), null);
 });

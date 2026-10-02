@@ -143,16 +143,26 @@ async function sessionAccount(context) {
   }
 }
 
-export async function get_auth_status(context, overridePath?: string, _allowGuest = true) {
-  const path = requestPath(context, overridePath);
+async function pathAuthStatus(context, path: string | null, write = false) {
   if (path === null) return false;
 
   const account = await sessionAccount(context);
   if (!account) return false;
   const permissions = accountPermissions(context, account);
   if (!permissions) return false;
+  if (write && (path === "public" || path.startsWith("public/"))) {
+    return permissions.split(",").includes("*");
+  }
   if (path.startsWith("_$flaredrive$/thumbnails/")) return true;
   return allowedPath(path, permissions);
+}
+
+export async function get_auth_status(context, overridePath?: string, _allowGuest = true) {
+  return pathAuthStatus(context, requestPath(context, overridePath));
+}
+
+export async function get_write_auth_status(context, overridePath?: string) {
+  return pathAuthStatus(context, requestPath(context, overridePath), true);
 }
 
 export function is_public_directory(context) {
