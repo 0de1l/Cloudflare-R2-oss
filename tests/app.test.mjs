@@ -40,6 +40,8 @@ test("public notice keeps upload status and rules without the removed privacy an
   assert.match(template, /上传至 public\/ 根目录，单文件上限/);
   assert.match(template, /同名不覆盖/);
   assert.match(template, /上传文件/);
+  assert.match(template, /placeholder="搜索文件和文件夹"/);
+  assert.match(template, /aria-label="搜索文件和文件夹"/);
   assert.doesNotMatch(template, /上传后立即公开，请勿上传私密文件/);
   assert.doesNotMatch(template, /删除、移动等管理操作仅限管理员/);
 });

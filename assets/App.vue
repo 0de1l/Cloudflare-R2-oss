@@ -55,10 +55,10 @@
           <span>我的目录</span>
         </button>
       </nav>
-      <input type="search" v-model="search" aria-label="Search" />
+      <input type="search" v-model="search" aria-label="搜索文件和文件夹" placeholder="搜索文件和文件夹" />
       <button v-if="!authenticated" class="account-action" @click="showLogin = true">用户登录</button>
       <div v-if="authenticated" class="menu-button">
-        <button class="circle" @click="showMenu = true">
+        <button class="menu-trigger" type="button" aria-label="打开功能菜单" aria-controls="account-actions-menu" :aria-expanded="showMenu" @click="showMenu = true">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 448 512"
@@ -960,12 +960,28 @@ export default {
   margin-left: 4px;
 }
 
-.menu-button > button {
-  transition: background-color 0.2s ease;
+.menu-button > .menu-trigger {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #303b39;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #111716, #0c100f);
+  color: #a9c0b9;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.menu-button > button:hover {
-  background-color: #202020;
+.menu-button > .menu-trigger:hover,
+.menu-button > .menu-trigger[aria-expanded="true"] {
+  border-color: #32685b;
+  background: linear-gradient(180deg, #18352f, #122722);
+  color: #baf3df;
+}
+
+.menu-button > .menu-trigger:focus-visible {
+  outline: 2px solid #91e3cf;
+  outline-offset: 2px;
 }
 
 .menu {
