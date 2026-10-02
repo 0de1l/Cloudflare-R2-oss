@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const source = readFileSync(new URL("../assets/App.vue", import.meta.url), "utf8")
+const appSource = readFileSync(new URL("../assets/App.vue", import.meta.url), "utf8");
+const template = appSource.match(/<template>([\s\S]*?)<\/template>/)[1];
+const source = appSource
   .match(/<script>([\s\S]*?)<\/script>/)[1]
   .replace(/import[\s\S]*?;/g, "")
   .replace("export default", "globalThis.options =");
@@ -31,6 +33,16 @@ const json = (value) => new Response(JSON.stringify(value));
 const guest = { authenticated: false, home: "public/", publicRoot: "public/" };
 const listing = (key) => ({ value: [{ key, size: 1 }], folders: [] });
 const settle = () => new Promise(setImmediate);
+
+test("public notice keeps upload status and rules without the removed privacy and management copy", () => {
+  assert.match(template, /所有人均可上传与下载/);
+  assert.match(template, /公开浏览与下载；上传暂未开放/);
+  assert.match(template, /上传至 public\/ 根目录，单文件上限/);
+  assert.match(template, /同名不覆盖/);
+  assert.match(template, /上传文件/);
+  assert.doesNotMatch(template, /上传后立即公开，请勿上传私密文件/);
+  assert.doesNotMatch(template, /删除、移动等管理操作仅限管理员/);
+});
 
 test("public subdirectory links survive session initialization and keep the directory slash", async () => {
   const requests = [];
