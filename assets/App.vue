@@ -68,13 +68,7 @@
           />
       </div>
     </div>
-    <div v-if="inPublicDirectory" class="public-notice">
-      <span class="public-mark" aria-hidden="true"></span>
-      <div class="public-upload-copy">
-        <span>{{ publicUploadEnabled ? "所有人均可上传与下载" : "公开浏览与下载；上传暂未开放" }}</span>
-        <span v-if="publicUploadEnabled">上传至 public/ 根目录，单文件上限 {{ formatSize(maxPublicUploadBytes) }}，同名不覆盖。上传后立即公开，请勿上传私密文件。</span>
-        <span>删除、移动等管理操作仅限管理员</span>
-      </div>
+    <div v-if="inPublicDirectory && canUpload" class="public-upload-bar">
       <button v-if="publicUploadEnabled" class="public-upload-action" @click="showUploadPopup = true">上传文件</button>
     </div>
     <ul v-if="uploadResults.length" class="upload-results" aria-live="polite" aria-label="上传结果">

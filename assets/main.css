@@ -210,16 +210,11 @@ button {
 .directory-switch button:hover { background: var(--surface-hover); color: var(--text); }
 .directory-switch button[aria-current="location"] { background: #102624; color: #9fe3dc; }
 .directory-switch button:focus-visible { outline: 2px solid #9fe3dc; outline-offset: 1px; }
-.public-notice { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 0 14px; border-bottom: 1px solid #292929; color: var(--muted); font-size: 12px; }
-.public-notice > span:nth-child(2) { color: #bfe4da; }
-.public-mark { width: 7px; height: 7px; border-radius: 50%; background: #77c8a5; box-shadow: 0 0 10px #77c8a555; }
-.notice-divider { color: #555; }
+.public-upload-bar { display: flex; justify-content: flex-end; padding: 8px 14px; border-bottom: 1px solid #292929; }
 .file-actions { display: flex; flex-shrink: 0; align-items: center; margin-left: auto; padding-right: 8px; }
 .download-action { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 12px; border: 1px solid #3e7775; border-radius: 6px; color: #a5e3dc; font-size: 13px; white-space: nowrap; }
 .download-action:hover { background: #102624; }
 .empty-admin-link { padding: 8px 0; color: #9fe3dc; text-decoration: underline; text-underline-offset: 3px; }
-.public-upload-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; padding: 10px 0; line-height: 1.5; }
-.public-upload-copy > span:first-child { color: #bfe4da; }
 .public-upload-action { flex-shrink: 0; min-height: 40px; padding: 0 12px; border: 1px solid #3e7775; border-radius: 6px; background: #102624; color: #9fe3dc; }
 .public-upload-action:focus-visible { outline: 2px solid #9fe3dc; outline-offset: 2px; }
 .popup-upload-notice { margin: 0; padding: 16px 16px 8px; color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -237,7 +232,6 @@ button {
   .directory-switch { order: 2; flex-basis: 100%; margin-right: 0; }
   .directory-switch button { flex: 1; }
   .app-bar input[type="search"] { order: 3; flex-basis: 100%; }
-  .public-notice { flex-wrap: wrap; gap: 7px; font-size: 11px; }
   .file-actions { padding-right: 4px; }
 }
 
