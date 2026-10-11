@@ -186,6 +186,15 @@
         </div>
       </li>
     </ul>
+    <button
+      v-if="listCursor"
+      type="button"
+      class="load-more"
+      :disabled="loadingMore"
+      @click="loadMoreFiles"
+    >
+      {{ loadingMore ? "加载中…" : loadMoreError ? "加载失败，重试" : "加载更多" }}
+    </button>
     <div v-if="loading" style="margin-top: 12px; text-align: center">
       <span>加载中...</span>
     </div>
@@ -267,6 +276,7 @@
 import {
   generateThumbnail,
   blobDigest,
+  encodeObjectKey,
   multipartUpload,
   SIZE_LIMIT,
 } from "/assets/main.mjs";
@@ -291,6 +301,9 @@ export default {
     cwd: new URL(window.location).searchParams.get("p") || "",
     files: [],
     folders: [],
+    listCursor: null,
+    loadingMore: false,
+    loadMoreError: false,
     clipboard: null,
     focusedItem: "",
     loading: false,
@@ -442,7 +455,7 @@ export default {
       this.showContextMenu = true;
     },
     rawUrl(key) {
-      return `/raw/${key.split("/").map(encodeURIComponent).join("/")}`;
+      return `/raw/${encodeObjectKey(key)}`;
     },
     copyLink(link) {
       const url = new URL(link, window.location.origin);
@@ -453,7 +466,7 @@ export default {
       if (!this.canManagePath(source) || !this.canManagePath(target)) {
         throw new Error("没有复制源文件或写入目标目录的权限");
       }
-      const uploadUrl = `/api/write/items/${target}`;
+      const uploadUrl = `/api/write/items/${encodeObjectKey(target)}`;
       await axios.put(uploadUrl, "", {
         headers: { "x-amz-copy-source": encodeURIComponent(source) },
       });
@@ -465,7 +478,7 @@ export default {
         const folderName = window.prompt("请输入文件夹名称");
         if (!folderName) return;
         this.showUploadPopup = false;
-        const uploadUrl = `/api/write/items/${this.cwd}${folderName}/_$folder$`;
+        const uploadUrl = `/api/write/items/${encodeObjectKey(`${this.cwd}${folderName}/_$folder$`)}`;
         await axios.put(uploadUrl, "");
         this.fetchFiles();
       } catch (error) {
@@ -482,10 +495,13 @@ export default {
       const requestId = ++this.listRequestId;
       this.files = [];
       this.folders = [];
+      this.listCursor = null;
+      this.loadingMore = false;
+      this.loadMoreError = false;
       this.lastFetchedPath = this.cwd;
       this.loading = true;
       this.loadError = false;
-      const path = this.cwd.split("/").map(encodeURIComponent).join("/");
+      const path = encodeObjectKey(this.cwd);
       try {
         const response = await fetch(`/api/children/${path}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Directory could not be loaded");
@@ -499,12 +515,50 @@ export default {
           return a.key.localeCompare(b.key);
         });
         this.folders = files.folders;
+        this.listCursor = files.cursor || null;
       } catch {
         if (requestId === this.listRequestId) this.loadError = true;
       } finally {
         if (requestId === this.listRequestId) {
           this.loading = false;
         }
+      }
+    },
+
+    async loadMoreFiles() {
+      const cursor = this.listCursor;
+      if (!cursor || this.loadingMore) return;
+
+      const requestId = this.listRequestId;
+      const url = new URL(`/api/children/${encodeObjectKey(this.cwd)}`, window.location.origin);
+      url.searchParams.set("cursor", cursor);
+      this.loadingMore = true;
+      this.loadMoreError = false;
+
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error("Directory page could not be loaded");
+        const page = await response.json();
+        if (requestId !== this.listRequestId) return;
+
+        const existingKeys = new Set(this.files.map((file) => file.key));
+        const newFiles = page.value.filter((file) => {
+          if (existingKeys.has(file.key)) return false;
+          existingKeys.add(file.key);
+          return true;
+        });
+        this.files = this.files.concat(newFiles);
+        this.files.sort((a, b) => {
+          if (this.order === "size-asc") return a.size - b.size;
+          if (this.order === "size-desc") return b.size - a.size;
+          return a.key.localeCompare(b.key);
+        });
+        this.folders = [...new Set(this.folders.concat(page.folders))];
+        this.listCursor = page.cursor || null;
+      } catch {
+        if (requestId === this.listRequestId) this.loadMoreError = true;
+      } finally {
+        if (requestId === this.listRequestId) this.loadingMore = false;
       }
     },
 
@@ -671,7 +725,7 @@ export default {
               if (file.size >= SIZE_LIMIT) {
                 await multipartUpload(`${basedir}${file.name}`, file, { headers, onUploadProgress });
               } else {
-                await axios.put(`/api/write/items/${basedir}${file.name}`, file, { headers, onUploadProgress });
+                await axios.put(`/api/write/items/${encodeObjectKey(`${basedir}${file.name}`)}`, file, { headers, onUploadProgress });
               }
             }
             result.status = "success";
@@ -723,7 +777,7 @@ export default {
     async removeFile(key) {
       if (!this.canManagePath(key)) return;
       if (!window.confirm(`确定要删除 ${key} 吗？`)) return;
-      await axios.delete(`/api/write/items/${key}`);
+      await axios.delete(`/api/write/items/${encodeObjectKey(key)}`);
       this.fetchFiles();
     },
 
@@ -732,7 +786,7 @@ export default {
       const newName = window.prompt("重命名为:");
       if (!newName) return;
       await this.copyPaste(key, `${this.cwd}${newName}`);
-      await axios.delete(`/api/write/items/${key}`);
+      await axios.delete(`/api/write/items/${encodeObjectKey(key)}`);
       this.fetchFiles();
     },
 
@@ -816,7 +870,7 @@ export default {
               // 复制到新位置
               await this.copyPaste(item.key, newPath);
               // 删除原位置
-              await axios.delete(`/api/write/items/${item.key}`);
+              await axios.delete(`/api/write/items/${encodeObjectKey(item.key)}`);
               
               // 更新进度
               processedItems++;
@@ -829,7 +883,7 @@ export default {
           // 移动目录标记
           const targetFolderPath = targetBasePath.slice(0, -1) + '_$folder$';
           await this.copyPaste(key, targetFolderPath);
-          await axios.delete(`/api/write/items/${key}`);
+          await axios.delete(`/api/write/items/${encodeObjectKey(key)}`);
           
           // 清除进度
           this.uploadProgress = null;
@@ -837,7 +891,7 @@ export default {
           // 单文件移动逻辑，修复根目录的情况
           const targetFilePath = normalizedPath + finalFileName;
           await this.copyPaste(key, targetFilePath);
-          await axios.delete(`/api/write/items/${key}`);
+          await axios.delete(`/api/write/items/${encodeObjectKey(key)}`);
         }
         
         // 刷新文件列表
@@ -850,39 +904,42 @@ export default {
 
     // 新增：递归获取目录下所有文件和子目录
     async getAllItems(prefix) {
-      const items = [];
-      let marker = null;
+      const items = new Map();
+      const visitedFolders = new Set();
+      let cursor = null;
       
       do {
-        const url = new URL(`/api/children/${prefix}`, window.location.origin);
-        if (marker) {
-          url.searchParams.set('marker', marker);
-        }
+        const url = new URL(`/api/children/${encodeObjectKey(prefix)}`, window.location.origin);
+        if (cursor) url.searchParams.set("cursor", cursor);
         
         const response = await fetch(url);
+        if (!response.ok) throw new Error("Directory could not be loaded");
         const data = await response.json();
         
-        // 添加文件
-        items.push(...data.value);
-        
-        // 处理子目录
-        for (const folder of data.folders) {
-          // 添加目录标记
-          items.push({
-            key: folder + '_$folder$',
-            size: 0,
-            uploaded: new Date().toISOString(),
-          });
-          
-          // 递归获取子目录内容
-          const subItems = await this.getAllItems(folder);
-          items.push(...subItems);
+        for (const item of data.value) {
+          if (!items.has(item.key)) items.set(item.key, item);
         }
         
-        marker = data.marker;
-      } while (marker);
+        for (const folder of data.folders) {
+          if (visitedFolders.has(folder)) continue;
+          visitedFolders.add(folder);
+          const folderMarker = {
+            key: folder + "_$folder$",
+            size: 0,
+            uploaded: new Date().toISOString(),
+          };
+          if (!items.has(folderMarker.key)) items.set(folderMarker.key, folderMarker);
+
+          const subItems = await this.getAllItems(folder);
+          for (const item of subItems) {
+            if (!items.has(item.key)) items.set(item.key, item);
+          }
+        }
+        
+        cursor = data.cursor || null;
+      } while (cursor);
       
-      return items;
+      return [...items.values()];
     },
 
     uploadFiles(files) {

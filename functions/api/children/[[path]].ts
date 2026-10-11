@@ -9,10 +9,12 @@ export async function onRequestGet(context) {
     if (!is_public_directory(context) && !(await get_auth_status(context, encodeURIComponent(prefix), false))) return authFailure();
     if (!bucket || prefix.startsWith("_$flaredrive$/")) return notFound();
 
+    const cursor = new URL(context.request.url).searchParams.get("cursor");
     const objList = await bucket.list({
       prefix,
       delimiter: "/",
       include: ["httpMetadata", "customMetadata"],
+      ...(cursor ? { cursor } : {}),
     });
     const objKeys = objList.objects
       .filter((obj) => !obj.key.endsWith("/_$folder$"))
@@ -25,7 +27,11 @@ export async function onRequestGet(context) {
     if (!path)
       folders = folders.filter((folder) => folder !== "_$flaredrive$/");
 
-    return new Response(JSON.stringify({ value: objKeys, folders }), {
+    return new Response(JSON.stringify({
+      value: objKeys,
+      folders,
+      cursor: objList.truncated ? objList.cursor || null : null,
+    }), {
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
   } catch (e) {

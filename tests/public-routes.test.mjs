@@ -244,6 +244,45 @@ test("directory listing accepts a trailing slash without changing the R2 prefix"
   assert.deepEqual((await response.json()).value.map((file) => file.key), ["public/readme.txt"]);
 });
 
+test("directory listing returns and consumes R2 cursors across pages", async () => {
+  const cursors = [];
+  const bucket = {
+    list: async (options) => {
+      cursors.push(options.cursor);
+      return options.cursor === undefined
+        ? {
+            objects: [{ key: "public/first.txt", size: 1, uploaded: new Date(0), httpMetadata: {}, customMetadata: {} }],
+            delimitedPrefixes: ["public/first-folder/"],
+            truncated: true,
+            cursor: "next +/?&=",
+          }
+        : {
+            objects: [{ key: "public/second.txt", size: 2, uploaded: new Date(0), httpMetadata: {}, customMetadata: {} }],
+            delimitedPrefixes: ["public/second-folder/"],
+            truncated: false,
+          };
+    },
+  };
+
+  const firstResponse = await children.onRequestGet(makeContext("api/children/public/", {
+    env: { BUCKET: bucket },
+  }));
+  assert.equal(firstResponse.status, 200, await firstResponse.clone().text());
+  const firstPage = await firstResponse.json();
+  assert.equal(firstPage.cursor, "next +/?&=");
+  assert.deepEqual(firstPage.value.map((file) => file.key), ["public/first.txt"]);
+
+  const cursor = encodeURIComponent(firstPage.cursor);
+  const secondResponse = await children.onRequestGet(makeContext(`api/children/public/?cursor=${cursor}`, {
+    env: { BUCKET: bucket },
+  }));
+  assert.equal(secondResponse.status, 200, await secondResponse.clone().text());
+  const secondPage = await secondResponse.json();
+  assert.equal(secondPage.cursor, null);
+  assert.deepEqual(secondPage.value.map((file) => file.key), ["public/second.txt"]);
+  assert.deepEqual(cursors, [undefined, "next +/?&="]);
+});
+
 test("limited accounts can list their directory root but cannot read a sibling or copy private files", async () => {
   const { authenticate } = await import("../utils/auth.ts");
   const env = { AUTH_USERS: '{"editor:secret":"docs/"}' };
@@ -468,7 +507,7 @@ test("public GET and HEAD replace unsafe legacy metadata using a strict extensio
   }
 });
 
-test("public filename headers safely encode Unicode and control characters while private metadata is unchanged", async () => {
+test("public filename headers safely encode Unicode and control characters while private metadata is constrained", async () => {
   const filename = '\u4e2d\u6587";\r\nreport.html';
   const context = makeContext(`raw/public/${encodeURIComponent(filename)}`);
   context.env.BUCKET.get = async () => ({ body: "file", httpEtag: '"test"' });
@@ -490,8 +529,77 @@ test("public filename headers safely encode Unicode and control characters while
     },
   });
   const privateResponse = await raw.onRequestGet(privateContext);
-  assert.equal(privateResponse.headers.get("content-type"), "application/pdf");
-  assert.equal(privateResponse.headers.get("content-disposition"), "inline");
-  assert.equal(privateResponse.headers.get("content-encoding"), "gzip");
-  assert.equal(privateResponse.headers.get("content-security-policy"), null);
+  assert.equal(privateResponse.headers.get("content-type"), "text/plain; charset=utf-8");
+  assert.match(privateResponse.headers.get("content-disposition"), /^inline;/);
+  assert.equal(privateResponse.headers.get("content-encoding"), null);
+  assert.equal(privateResponse.headers.get("x-content-type-options"), "nosniff");
+  assert.match(privateResponse.headers.get("content-security-policy"), /sandbox/);
+});
+
+test("private HTML uploaded through multipart is always downloaded with restrictive headers", async () => {
+  const { authenticate } = await import("../utils/auth.ts");
+  const env = { AUTH_USERS: '{"editor:secret":"docs/"}' };
+  const cookie = await authenticate(makeContext("", { env }), "editor", "secret");
+  const uploads = new Map();
+  const stored = new Map();
+  const bucket = {
+    createMultipartUpload: async (key, options) => {
+      uploads.set("html-upload", { key, contentType: options.httpMetadata.contentType, parts: [] });
+      return { key, uploadId: "html-upload" };
+    },
+    resumeMultipartUpload: async (key, uploadId) => ({
+      uploadPart: async (_partNumber, body) => {
+        uploads.get(uploadId).parts.push(await new Response(body).text());
+        return { etag: "html-part" };
+      },
+      complete: async () => {
+        const upload = uploads.get(uploadId);
+        stored.set(key, { contentType: upload.contentType, body: upload.parts.join("") });
+        return { httpEtag: '"html-etag"' };
+      },
+    }),
+    get: async (key) => {
+      const object = stored.get(key);
+      return object && {
+        body: new Response(object.body).body,
+        httpEtag: '"html-etag"',
+        writeHttpMetadata(headers) { headers.set("content-type", object.contentType); },
+      };
+    },
+    head: async (key) => {
+      const object = stored.get(key);
+      return object && {
+        httpEtag: '"html-etag"',
+        writeHttpMetadata(headers) { headers.set("content-type", object.contentType); },
+      };
+    },
+  };
+  const body = "<script>fetch('/api/auth/session')</script>";
+  const requests = [
+    ["POST", writes.onRequestPost, "?uploads", undefined, { "content-type": "text/html" }],
+    ["PUT", writes.onRequestPut, "?uploadId=html-upload&partNumber=1", body],
+    ["POST", writes.onRequestPost, "?uploadId=html-upload", JSON.stringify({ parts: [{ partNumber: 1, etag: "html-part" }] })],
+  ];
+  for (const [method, handler, suffix, requestBody, headers] of requests) {
+    const response = await handler(makeContext(`api/write/items/docs/payload.html${suffix}`, {
+      cookie, env: { ...env, BUCKET: bucket }, method, body: requestBody, headers,
+    }));
+    assert.equal(response.status, 200);
+  }
+
+  const routeContext = (method) => makeContext("raw/docs/payload.html", {
+    cookie, env: { ...env, BUCKET: bucket }, method,
+  });
+  const getResponse = await raw.onRequestGet(routeContext("GET"));
+  assert.equal(await getResponse.text(), body);
+  assert.equal(getResponse.headers.get("content-type"), "application/octet-stream");
+  assert.match(getResponse.headers.get("content-disposition"), /^attachment;/);
+  assert.equal(getResponse.headers.get("x-content-type-options"), "nosniff");
+  assert.match(getResponse.headers.get("content-security-policy"), /sandbox/);
+
+  const headResponse = await raw.onRequestHead(routeContext("HEAD"));
+  assert.equal(headResponse.status, 200);
+  assert.equal(await headResponse.text(), "");
+  assert.equal(headResponse.headers.get("content-type"), "application/octet-stream");
+  assert.match(headResponse.headers.get("content-disposition"), /^attachment;/);
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
+import { multipartUpload, SIZE_LIMIT as UPLOAD_SIZE_LIMIT } from "../assets/main.mjs";
 
 const appSource = readFileSync(new URL("../assets/App.vue", import.meta.url), "utf8");
 const template = appSource.match(/<template>([\s\S]*?)<\/template>/)[1];
@@ -21,7 +22,7 @@ function mount(url, fetch, overrides = {}) {
     },
     addEventListener(name, listener) { listeners[name] = listener; },
   };
-  const scope = { window, URL, fetch, setTimeout() {}, SIZE_LIMIT: 100000000, document: {}, Dialog: {}, Menu: {}, MimeIcon: {}, UploadPopup: {}, ...overrides };
+  const scope = { window, URL, fetch, setTimeout() {}, SIZE_LIMIT: 100000000, encodeObjectKey, document: {}, Dialog: {}, Menu: {}, MimeIcon: {}, UploadPopup: {}, ...overrides };
   vm.runInNewContext(source, scope);
   const app = scope.options.data();
   for (const [name, method] of Object.entries(scope.options.methods)) app[name] = method.bind(app);
@@ -33,6 +34,7 @@ const json = (value) => new Response(JSON.stringify(value));
 const guest = { authenticated: false, home: "public/", publicRoot: "public/" };
 const listing = (key) => ({ value: [{ key, size: 1 }], folders: [] });
 const settle = () => new Promise(setImmediate);
+const encodeObjectKey = (key) => key.split("/").map(encodeURIComponent).join("/");
 
 test("public notice keeps upload status and rules without the removed privacy and management copy", () => {
   assert.match(template, /所有人均可上传与下载/);
@@ -134,6 +136,58 @@ test("latest refresh wins even when requests target the same directory", async (
   await settle();
   assert.equal(app.files[0].key, "public/new.txt");
   assert.equal(app.loadError, false);
+});
+
+test("directory pagination appends each page once and exposes a load-more control", async () => {
+  const cursor = "next +/?&=";
+  const requests = [];
+  const { app } = mount("https://drive.test/?p=docs/", async (input) => {
+    const url = new URL(input, "https://drive.test");
+    requests.push(url);
+    return url.searchParams.has("cursor")
+      ? json({
+          value: [
+            { key: "docs/shared.txt", size: 2 },
+            { key: "docs/second.txt", size: 3 },
+            { key: "docs/second.txt", size: 3 },
+          ],
+          folders: ["docs/sub/", "docs/other/"],
+          cursor: null,
+        })
+      : json({
+          value: [{ key: "docs/first.txt", size: 1 }, { key: "docs/shared.txt", size: 2 }],
+          folders: ["docs/sub/"],
+          cursor,
+        });
+  });
+
+  await app.fetchFiles();
+  assert.equal(app.listCursor, cursor);
+  await app.loadMoreFiles();
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].searchParams.get("cursor"), cursor);
+  assert.deepEqual(app.files.map((file) => file.key), ["docs/first.txt", "docs/second.txt", "docs/shared.txt"]);
+  assert.deepEqual([...app.folders], ["docs/sub/", "docs/other/"]);
+  assert.equal(app.listCursor, null);
+  assert.match(template, /v-if="listCursor"[\s\S]*?loadMoreFiles/);
+});
+
+test("recursive folder collection continues through all cursor pages", async () => {
+  const requests = [];
+  const { app } = mount("https://drive.test/", async (input) => {
+    const url = new URL(input, "https://drive.test");
+    requests.push(url);
+    return url.searchParams.has("cursor")
+      ? json({ value: [{ key: "docs/second.txt" }], folders: [], cursor: null })
+      : json({ value: [{ key: "docs/first.txt" }], folders: [], cursor: "next" });
+  });
+
+  const items = await app.getAllItems("docs/");
+
+  assert.deepEqual([...items].map((item) => item.key), ["docs/first.txt", "docs/second.txt"]);
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].searchParams.get("cursor"), "next");
 });
 
 test("login requires a confirmed authenticated session and handles network failures", async () => {
@@ -340,6 +394,82 @@ test("private upload behavior stays available while disabled public upload fails
   await app.processUploadQueue();
   assert.equal(writes.length, 1);
   assert.equal(writes[0][0], "/api/write/items/docs/yes.txt");
+});
+
+test("private uploads encode special filename characters without changing the stored key", async () => {
+  const writes = [];
+  const { app } = mount("https://drive.test/?p=docs/", async () => json({ value: [], folders: [] }), {
+    axios: { put: async (...args) => { writes.push(args); } },
+  });
+  app.authenticated = true;
+  app.cwd = "docs/";
+  const names = ["file#name.txt", "file?name.txt", "100%.txt", "space name.txt", "中文.txt"];
+  const files = names.map((name) => ({ name, size: 2, type: "application/octet-stream" }));
+
+  app.uploadFiles(files);
+  await app.processUploadQueue();
+
+  assert.deepEqual(writes.map(([url]) => url), names.map((name) =>
+    `/api/write/items/${encodeObjectKey(`docs/${name}`)}`
+  ));
+  assert.deepEqual(writes.map(([, file]) => file.name), names);
+  assert.ok(app.uploadResults.every((result) => result.status === "success"));
+});
+
+test("copy, delete, and rename encode complete object keys in API paths", async () => {
+  const writes = [];
+  const deletes = [];
+  const { app, window } = mount("https://drive.test/?p=docs/", async () => json({ value: [], folders: [] }), {
+    axios: {
+      put: async (...args) => { writes.push(args); },
+      delete: async (url) => { deletes.push(url); },
+    },
+  });
+  app.authenticated = true;
+  app.cwd = "docs/";
+  const source = "docs/source #?% 中文.txt";
+  const copyTarget = "docs/copy #?% 中文.txt";
+  await app.copyPaste(source, copyTarget);
+  assert.equal(writes[0][0], `/api/write/items/${encodeObjectKey(copyTarget)}`);
+  assert.equal(decodeURIComponent(writes[0][2].headers["x-amz-copy-source"]), source);
+
+  window.confirm = () => true;
+  await app.removeFile("docs/delete #?% 中文.txt");
+  assert.equal(deletes[0], `/api/write/items/${encodeObjectKey("docs/delete #?% 中文.txt")}`);
+
+  window.prompt = () => "renamed #?% 中文.txt";
+  await app.renameFile(source);
+  assert.equal(writes[1][0], `/api/write/items/${encodeObjectKey("docs/renamed #?% 中文.txt")}`);
+  assert.equal(deletes[1], `/api/write/items/${encodeObjectKey(source)}`);
+});
+
+test("multipart upload encodes the same object key for create, parts, and completion", async () => {
+  const calls = [];
+  const originalAxios = globalThis.axios;
+  globalThis.axios = {
+    post: async (url) => {
+      calls.push(url);
+      return url.endsWith("?uploads") ? { data: { uploadId: "upload-1" } } : {};
+    },
+    put: async (url) => {
+      calls.push(url);
+      return { headers: { etag: "part-etag" } };
+    },
+  };
+  try {
+    await multipartUpload("docs/100% #? 中文.bin", {
+      size: UPLOAD_SIZE_LIMIT,
+      type: "application/octet-stream",
+      slice: () => new Uint8Array([1]),
+    }, {});
+  } finally {
+    if (originalAxios === undefined) delete globalThis.axios;
+    else globalThis.axios = originalAxios;
+  }
+
+  const expectedPath = `/api/write/items/${encodeObjectKey("docs/100% #? 中文.bin")}`;
+  assert.equal(calls.length, 3);
+  for (const url of calls) assert.equal(new URL(url, "https://drive.test").pathname, expectedPath);
 });
 
 test("logout cancels queued private uploads and an in-flight thumbnail cannot start a private write", async () => {

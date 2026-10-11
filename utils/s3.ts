@@ -17,6 +17,24 @@ async function hmacSHA256(secret: ArrayBuffer, message: string | ArrayBuffer) {
   return signature;
 }
 
+function encodeQueryComponent(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
+    `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+}
+
+export function canonicalizeQuery(searchParams: URLSearchParams) {
+  const encoded = [...searchParams].map(([key, value]): [string, string] => [
+    encodeQueryComponent(key),
+    encodeQueryComponent(value),
+  ]);
+  const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+  encoded.sort(([leftKey, leftValue], [rightKey, rightValue]) =>
+    compare(leftKey, rightKey) || compare(leftValue, rightValue)
+  );
+  return encoded.map(([key, value]) => `${key}=${value}`).join("&");
+}
+
 export class S3Client {
   accessKeyId: string;
   secretAccessKey: string;
@@ -33,12 +51,7 @@ export class S3Client {
     const url = new URL(input);
     const objectKey = decodeURI(url.pathname);
     const method = init.method || "GET";
-    const canonicalQueryString = [...url.searchParams]
-      .map(
-        ([key, value]) =>
-          encodeURIComponent(key) + "=" + encodeURIComponent(value)
-      )
-      .join("&");
+    const canonicalQueryString = canonicalizeQuery(url.searchParams);
     const hashedPayload = "UNSIGNED-PAYLOAD";
     const headers = new Headers(init.headers);
     const datetime = new Date().toISOString().replace(/-|:|\.\d+/g, "");

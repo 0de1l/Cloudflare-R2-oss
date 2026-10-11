@@ -22,7 +22,7 @@ const INLINE_CONTENT_TYPES = new Map([
   ["txt", "text/plain; charset=utf-8"],
 ]);
 
-export function publicContentHeaders(key: string) {
+export function safeContentHeaders(key: string) {
   const filename = key.split("/").pop() || "download";
   const extension = filename.includes(".") ? filename.split(".").pop().toLowerCase() : "";
   const inlineType = INLINE_CONTENT_TYPES.get(extension);
@@ -31,7 +31,7 @@ export function publicContentHeaders(key: string) {
     `%${char.charCodeAt(0).toString(16).toUpperCase()}`
   );
 
-  // Public object metadata is untrusted, including metadata on pre-existing files.
+  // Stored object metadata is untrusted, including metadata on pre-existing files.
   return new Headers({
     "Content-Type": inlineType || "application/octet-stream",
     "Content-Disposition": `${inlineType ? "inline" : "attachment"}; filename="${fallback}"; filename*=UTF-8''${encoded}`,
