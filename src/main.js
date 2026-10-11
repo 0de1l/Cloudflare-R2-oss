@@ -3,13 +3,9 @@ import axios from "axios";
 import App from "../assets/App.vue";
 import "../assets/main.css";
 
+// Keep the legacy Axios global available to the Vue component.
 window.axios = axios;
 
-const app = createApp({
-  components: {
-    App: defineAsyncComponent(() => Promise.resolve(App)),
-  },
-  template: "<App />",
-});
+createApp(App).mount("#app");
 
 app.mount("#app");
