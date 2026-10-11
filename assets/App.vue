@@ -95,7 +95,7 @@
       </li>
     </ul>
     <ul class="file-list">
-      <li v-if="cwd !== '' && (authenticated || cwd !== publicRoot)">
+      <li v-if="canGoToParentDirectory">
         <div
           tabindex="0"
           class="file-item"
@@ -311,6 +311,12 @@ export default {
   }),
 
   computed: {
+    canGoToParentDirectory() {
+      return this.cwd !== "" && (
+        this.canManagePublic || (this.cwd !== this.publicRoot && this.cwd !== this.home)
+      );
+    },
+
     inPublicDirectory() {
       return this.cwd.startsWith(this.publicRoot);
     },

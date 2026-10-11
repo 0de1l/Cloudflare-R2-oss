@@ -65,6 +65,29 @@ test("limited accounts use the session home when opening the site without a path
   assert.equal(app.cwd, "docs/");
 });
 
+test("ordinary accounts do not get parent navigation from their public or personal roots", () => {
+  const { app } = mount("https://drive.test/", async () => json({ value: [], folders: [] }));
+  app.authenticated = true;
+  app.canManagePublic = false;
+  app.publicRoot = "public/";
+  app.home = "docs/";
+
+  app.cwd = "public/";
+  assert.equal(app.canGoToParentDirectory, false);
+  app.cwd = "docs/";
+  assert.equal(app.canGoToParentDirectory, false);
+  app.cwd = "public/nested/";
+  assert.equal(app.canGoToParentDirectory, true);
+  app.cwd = "docs/nested/";
+  assert.equal(app.canGoToParentDirectory, true);
+  app.cwd = "";
+  assert.equal(app.canGoToParentDirectory, false);
+
+  app.canManagePublic = true;
+  app.cwd = "public/";
+  assert.equal(app.canGoToParentDirectory, true);
+});
+
 test("guest history navigation never leaves public and normalizes directory paths", async () => {
   const { app, options, window, listeners } = mount("https://drive.test/", async (url) =>
     json(url === "/api/auth/session" ? guest : listing("public/readme.txt")));
