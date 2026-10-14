@@ -5,6 +5,8 @@ import vm from "node:vm";
 import { multipartUpload, SIZE_LIMIT as UPLOAD_SIZE_LIMIT } from "../assets/main.mjs";
 
 const appSource = readFileSync(new URL("../assets/App.vue", import.meta.url), "utf8");
+const bootstrapSource = readFileSync(new URL("../src/main.js", import.meta.url), "utf8");
+const manifest = JSON.parse(readFileSync(new URL("../assets/manifest.json", import.meta.url), "utf8"));
 const template = appSource.match(/<template>([\s\S]*?)<\/template>/)[1];
 const source = appSource
   .match(/<script>([\s\S]*?)<\/script>/)[1]
@@ -35,6 +37,16 @@ const guest = { authenticated: false, home: "public/", publicRoot: "public/" };
 const listing = (key) => ({ value: [{ key, size: 1 }], folders: [] });
 const settle = () => new Promise(setImmediate);
 const encodeObjectKey = (key) => key.split("/").map(encodeURIComponent).join("/");
+
+test("Vue bootstrap mounts the app only once", () => {
+  assert.equal([...bootstrapSource.matchAll(/\.mount\("#app"\)/g)].length, 1);
+});
+
+test("PWA manifest points to a valid root-level public icon", () => {
+  assert.equal(manifest.icons[0].src, "/homescreen.png");
+  const icon = readFileSync(new URL("../public/homescreen.png", import.meta.url));
+  assert.deepEqual([...icon.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+});
 
 test("public notice keeps upload status and rules without the removed privacy and management copy", () => {
   assert.match(template, /所有人均可上传与下载/);

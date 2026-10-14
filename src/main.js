@@ -7,5 +7,3 @@ import "../assets/main.css";
 window.axios = axios;
 
 createApp(App).mount("#app");
-
-app.mount("#app");

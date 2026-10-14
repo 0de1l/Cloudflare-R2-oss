@@ -5,7 +5,7 @@
   "start_url": "/",
   "icons": [
     {
-      "src": "homescreen.png",
+      "src": "/homescreen.png",
       "sizes": "144x144",
       "type": "image/png"
     }
